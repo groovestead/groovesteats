@@ -4,7 +4,7 @@ Ett söksverktyg för SBL Dam-statistik. Hämtar matchdata direkt från
 FIBA LiveStats (samma datakälla som Profixio bygger på) och presenterar
 den i ett enklare gränssnitt.
 
-**Live:** https://groovestead.github.io/sbldamstats/
+**Live:** [https://groovestead.github.io/sbldamstats/](https://groovestead.github.io/groovestats/)
 
 ## Vad det gör
 
