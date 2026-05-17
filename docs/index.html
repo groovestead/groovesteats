@@ -98,10 +98,10 @@ footer.site a { color: #6cb6ff; }
 }
 .scroll-x table th:first-child,
 .scroll-x table td:first-child {
-  position: sticky; left: 0; background: #161a22; z-index: 1;
+  position: sticky; left: 0; background: #161a22; z-index: 3;
   box-shadow: inset -1px 0 0 #2a2f3a;
 }
-.scroll-x table thead th:first-child { z-index: 3; }
+.scroll-x table thead th:first-child { z-index: 4; }
 tr.match:hover td:first-child { background: #1a1f2a; }
 
 .cmp-player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -313,7 +313,7 @@ function gmsc(r) {
 
 function fmtSeason(year) {
   const y = Number(year);
-  return (y % 100) + '/' + String((y + 1) % 100).padStart(2, '0');
+  return String((y - 1) % 100).padStart(2, '0') + '/' + String(y % 100).padStart(2, '0');
 }
 
 // =============================================================================
@@ -692,7 +692,7 @@ function buildPlayerStats(rows) {
   return renderBestsBox(_pBests, bestsLabel)
        + renderRecentVsSeason(rows)
        + renderSeasonsTable(rows)
-       + renderTeamsTable(teamsByYear(rows))
+       + (_pSeason ? '' : renderTeamsTable(teamsByYear(rows)))
        + renderGameLog(rows);
 }
 
@@ -1584,14 +1584,14 @@ function renderTeamPage(teamName) {
     const finRows = finalsAppearances.map(f => {
       const role = f.champion === teamName ? '<span style="color:#ffc53d">🏆 SM-guld</span>' : '<span class="muted">🥈 Finalist</span>';
       const opp = f.champion === teamName ? f.finalist : f.champion;
-      return `<tr class="match"><td>${f.year}</td><td>${role}</td><td>${escapeHtml(opp)}</td></tr>`;
+      return `<tr class="match"><td>${fmtSeason(f.year)}</td><td>${role}</td><td>${escapeHtml(opp)}</td></tr>`;
     }).join('');
     html += `
       <div class="section">
         <h2>SM-historia</h2>
         <div class="card scroll-x">
           <table>
-            <thead><tr><th>År</th><th>Roll</th><th>Mot</th></tr></thead>
+            <thead><tr><th>Säsong</th><th>Roll</th><th>Mot</th></tr></thead>
             <tbody>${finRows}</tbody>
           </table>
         </div>
