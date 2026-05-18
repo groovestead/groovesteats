@@ -127,7 +127,6 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   th, td { padding: 6px 8px; font-size: 13px; }
 }
 .info-tip {
-  position: relative;
   display: inline-block;
   cursor: help;
   color: #6c7a8c;
@@ -136,12 +135,8 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   vertical-align: middle;
   line-height: 1;
 }
-.info-tip::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+#tip-popup {
+  position: fixed;
   background: #1e2736;
   border: 1px solid #2a3a4a;
   border-radius: 6px;
@@ -152,15 +147,13 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   pointer-events: none;
   opacity: 0;
   transition: opacity .15s;
-  z-index: 200;
+  z-index: 9999;
   color: #c8d0dc;
   line-height: 1.5;
-  min-width: 200px;
+  max-width: 280px;
   text-transform: none;
   letter-spacing: 0;
 }
-.info-tip:hover::after, .info-tip.open::after { opacity: 1; }
-.info-tip.tip-left::after { left: auto; right: 0; transform: none; }
 </style>
 </head>
 <body>
@@ -174,6 +167,7 @@ tr.match:hover td:first-child { background: #1a1f2a; }
     </div>
   </div>
 </header>
+<div id="tip-popup"></div>
 
 <main class="wrap" id="main">
   <div class="loading">Laddar data…</div>
@@ -376,15 +370,52 @@ const _TIPS = {
   ts:  'True Shooting %\nTotalt skjutningseffektivitet inkl. fritkast.\nPTS / (2 × (FGA + 0,44 × FTA))',
   gmsc:'Game Score (Hollinger)\nSamlat matchbetyg på en enda skala.\nPTS + 0,4×FG − 0,7×FGA − 0,4×(FTA−FT)\n+ 0,7×OR + 0,3×DR + STL + 0,7×AST + 0,7×BLK − 0,4×PF − TOV',
 };
-function infoTip(key, cls = '') {
-  return `<span class="info-tip${cls ? ' '+cls : ''}" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
+function infoTip(key) {
+  return `<span class="info-tip" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
 }
-// Stäng open-tooltip vid klick utanför; toggla vid klick på ikon (mobil)
-document.addEventListener('click', e => {
-  const tip = e.target.closest('.info-tip');
-  document.querySelectorAll('.info-tip.open').forEach(el => { if (el !== tip) el.classList.remove('open'); });
-  if (tip) { e.stopPropagation(); tip.classList.toggle('open'); }
-});
+// Tooltip via position:fixed — fungerar även inuti overflow:auto-containers
+(function() {
+  const popup = document.getElementById('tip-popup');
+  let hideTimer;
+  function showTip(el) {
+    clearTimeout(hideTimer);
+    const text = el.dataset.tip || '';
+    popup.textContent = text;
+    popup.style.opacity = '0';
+    popup.style.display = 'block';
+    const rect = el.getBoundingClientRect();
+    const pw = popup.offsetWidth, ph = popup.offsetHeight;
+    let left = rect.left + rect.width / 2 - pw / 2;
+    let top  = rect.top - ph - 8;
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    if (left < 8) left = 8;
+    if (top < 8) top = rect.bottom + 8;
+    popup.style.left = left + 'px';
+    popup.style.top  = top  + 'px';
+    popup.style.opacity = '1';
+  }
+  function hideTip() {
+    hideTimer = setTimeout(() => { popup.style.opacity = '0'; }, 100);
+  }
+  document.addEventListener('mouseover', e => {
+    const tip = e.target.closest('.info-tip');
+    if (tip) showTip(tip); else hideTip();
+  });
+  document.addEventListener('mouseout', e => {
+    if (e.target.closest('.info-tip')) hideTip();
+  });
+  // Mobil: toggla vid klick
+  document.addEventListener('click', e => {
+    const tip = e.target.closest('.info-tip');
+    if (tip) {
+      e.stopPropagation();
+      if (popup.style.opacity === '1' && popup._src === tip) { hideTip(); popup._src = null; }
+      else { showTip(tip); popup._src = tip; }
+    } else {
+      hideTip(); popup._src = null;
+    }
+  });
+})();
 
 // Returnerar en stjärna för den givna statkolumnen i spelloggen:
 // röd = karriärbäst, gul = bäst inom nuvarande filter (men inte karriärbäst).
@@ -1135,9 +1166,9 @@ function renderSeasonsTable(allRows) {
             <th>Säsong</th><th>Matcher</th>
             <th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th>
             <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-            <th>eFG%${infoTip('efg','tip-left')}</th>
-            <th>TS%${infoTip('ts','tip-left')}</th>
-            <th>GmSc${infoTip('gmsc','tip-left')}</th>
+            <th>eFG%${infoTip('efg')}</th>
+            <th>TS%${infoTip('ts')}</th>
+            <th>GmSc${infoTip('gmsc')}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1440,8 +1471,8 @@ function renderMatchPage(matchId) {
               <th>STL</th><th>BLK</th><th>TOV</th>
               <th title="Offensiva fouls">OF</th>
               <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-              <th>eFG%${infoTip('efg','tip-left')}</th>
-              <th>GmSc${infoTip('gmsc','tip-left')}</th>
+              <th>eFG%${infoTip('efg')}</th>
+              <th>GmSc${infoTip('gmsc')}</th>
             </tr></thead>
             <tbody>${bodyRows}${totRow}</tbody>
           </table>
@@ -1996,11 +2027,11 @@ function renderTeamSeasonLeaders(teamName, year) {
 }
 
 // Sorterbar kolumnrubrik för spelmatchlogg
-function _glTh(col, label, tipKey, tipCls = '') {
+function _glTh(col, label, tipKey) {
   const active = _glSort.col === col;
   const ind = active ? (_glSort.dir < 0 ? ' ▼' : ' ▲') : '';
   const color = active ? ';color:#cce5ff' : '';
-  const tip = tipKey ? infoTip(tipKey, tipCls) : '';
+  const tip = tipKey ? infoTip(tipKey) : '';
   return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}">${label}${ind}${tip}</th>`;
 }
 
@@ -2096,7 +2127,7 @@ function renderGameLog(allRows) {
             <th title="Tekniska/osportsliga fouls">TF</th>
             <th>FG</th><th>3P</th><th>FT</th>
             ${_glTh('plus_minus','+/-')}
-            ${_glTh('gmsc','GmSc','gmsc','tip-left')}
+            ${_glTh('gmsc','GmSc','gmsc')}
           </tr></thead>
           <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
         </table>
