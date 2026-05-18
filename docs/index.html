@@ -518,7 +518,7 @@ function navigateHome(restoreSearch = false) {
   $search.focus();
 }
 
-document.getElementById('home-link').addEventListener('click', navigateHome);
+document.getElementById('home-link').addEventListener('click', () => navigateHome());
 
 window.addEventListener('hashchange', route);
 window.addEventListener('popstate', route);
