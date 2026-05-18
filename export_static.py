@@ -351,7 +351,7 @@ def compute_and_write_lineups(conn, pbp_dir, out_dir):
                 })
             rows.sort(key=lambda r: r['secs'], reverse=True)
             out[str(year)] = rows[:50]  # top 50 lineups per season
-        fname = urllib.parse.quote(team_canon, safe='') + '.json'
+        fname = team_canon + '.json'
         with open(lineups_dir / fname, 'w', encoding='utf-8') as f:
             json.dump(out, f, separators=(',', ':'), ensure_ascii=False)
         files_written += 1
