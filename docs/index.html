@@ -209,6 +209,7 @@ let _pCareerBests = {};       // {field: {val, matchId}} always career-wide
 let _pFilteredRows = [];      // current filtered rows (season + phase)
 let _tName = null;            // current team page name
 let _tSeason = null;          // selected season year on team page (null = all)
+let _tLineups = {};           // cache: {teamName: {year: [...]}} loaded from lineups JSON
 
 const $main = document.getElementById('main');
 const $search = document.getElementById('search');
@@ -1729,6 +1730,82 @@ function renderRecordsPage() {
 }
 
 // =============================================================================
+// Render: lagsida — femmannor (lineups)
+// =============================================================================
+
+async function loadAndRenderLineups(teamName) {
+  const el = document.getElementById('team-lineups');
+  if (!el) return;
+
+  // Use cache
+  if (!_tLineups[teamName]) {
+    const encoded = encodeURIComponent(teamName);
+    try {
+      const r = await fetch(`./lineups/${encoded}.json`);
+      if (!r.ok) { el.innerHTML = ''; return; }
+      _tLineups[teamName] = await r.json();
+    } catch (e) {
+      el.innerHTML = '';
+      return;
+    }
+  }
+
+  el.innerHTML = renderLineupsSection(teamName, _tLineups[teamName]);
+}
+
+function renderLineupsSection(teamName, allData) {
+  const year = _tSeason;
+  const key = year ? String(year) : null;
+
+  // Find available years (newest first)
+  const years = Object.keys(allData).map(Number).sort((a, b) => b - a);
+  if (!years.length) return '';
+
+  // Use selected season, or most recent that has data
+  const useYear = (key && allData[key]) ? key : String(years[0]);
+  const rows = allData[useYear] || [];
+
+  if (!rows.length) return '';
+
+  const tableRows = rows.map((lu, i) => {
+    const names = lu.players.map(pk => {
+      const p = PLAYERS_BY_KEY[pk];
+      const name = p ? fullName(p) : pk.split('|').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+      return `<a href="#/player/${encodeURIComponent(pk)}">${escapeHtml(name)}</a>`;
+    }).join(', ');
+    const mins = (lu.secs / 60).toFixed(1);
+    const pmStr = lu.pm > 0 ? `+${lu.pm}` : String(lu.pm);
+    const pmColor = lu.pm > 0 ? 'color:#6cb6ff' : lu.pm < 0 ? 'color:#ff8b8b' : 'color:#9aa3b2';
+    return `<tr class="match">
+      <td class="muted" style="width:20px">${i + 1}</td>
+      <td style="text-align:left">${names}</td>
+      <td>${mins}</td>
+      <td style="${pmColor}">${pmStr}</td>
+      <td>${lu.games}</td>
+    </tr>`;
+  }).join('');
+
+  const seasonLabel = _tSeason ? `Säsong ${fmtSeason(Number(useYear))}` : `Säsong ${fmtSeason(Number(useYear))} (senaste)`;
+
+  return `
+    <div class="section">
+      <h2>Vanligaste femmannor — ${seasonLabel}</h2>
+      <div class="card scroll-x">
+        <table>
+          <thead><tr>
+            <th style="width:20px">#</th>
+            <th style="text-align:left">Spelare</th>
+            <th>Min</th>
+            <th>+/−</th>
+            <th>Matcher</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// =============================================================================
 // Render: lagsida
 // =============================================================================
 
@@ -1746,6 +1823,11 @@ function filterTeamPage(year) {
   // Uppdatera ledaravsnittet
   const div = document.getElementById('team-leaders');
   if (div) div.innerHTML = renderTeamSeasonLeaders(_tName, _tSeason);
+  // Uppdatera femmannavsnittet om data redan är cachad
+  const el = document.getElementById('team-lineups');
+  if (el && _tLineups[_tName]) {
+    el.innerHTML = renderLineupsSection(_tName, _tLineups[_tName]);
+  }
 }
 
 function renderTeamPage(teamName) {
@@ -1842,10 +1924,12 @@ function renderTeamPage(teamName) {
       <button class="t-season-btn" data-year="all" style="${btnStyle(_tSeason===null)}" onclick="filterTeamPage(null)">Alla säsonger</button>
       ${seasonBtns}
     </div>
-    <div id="team-leaders">${renderTeamSeasonLeaders(teamName, _tSeason)}</div>`;
+    <div id="team-leaders">${renderTeamSeasonLeaders(teamName, _tSeason)}</div>
+    <div id="team-lineups"></div>`;
 
   $main.innerHTML = html;
   window.scrollTo(0, 0);
+  loadAndRenderLineups(teamName);  // async, fills in after page renders
 }
 
 function renderTeamSeasonLeaders(teamName, year) {
