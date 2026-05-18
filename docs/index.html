@@ -126,6 +126,40 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   .player-name { font-size: 22px; }
   th, td { padding: 6px 8px; font-size: 13px; }
 }
+.info-tip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: #6c7a8c;
+  font-size: 11px;
+  margin-left: 2px;
+  vertical-align: middle;
+  line-height: 1;
+}
+.info-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e2736;
+  border: 1px solid #2a3a4a;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 200;
+  color: #c8d0dc;
+  line-height: 1.5;
+  min-width: 200px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.info-tip:hover::after, .info-tip.open::after { opacity: 1; }
 </style>
 </head>
 <body>
@@ -334,6 +368,21 @@ const TEAM_ABBREV = {
 function abbrevTeam(name) {
   return name ? (TEAM_ABBREV[name] || name.split(' ')[0]) : '';
 }
+
+const _TIPS = {
+  efg: 'Effective Field Goal %\nJusterar för att en trepoängare är värd mer än en tvåa.\n(FGM + 0,5 × 3PM) / FGA',
+  ts:  'True Shooting %\nTotalt skjutningseffektivitet inkl. fritkast.\nPTS / (2 × (FGA + 0,44 × FTA))',
+  gmsc:'Game Score (Hollinger)\nSamlat matchbetyg på en enda skala.\nPTS + 0,4×FG − 0,7×FGA − 0,4×(FTA−FT)\n+ 0,7×OR + 0,3×DR + STL + 0,7×AST + 0,7×BLK − 0,4×PF − TOV',
+};
+function infoTip(key) {
+  return `<span class="info-tip" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
+}
+// Stäng open-tooltip vid klick utanför; toggla vid klick på ikon (mobil)
+document.addEventListener('click', e => {
+  const tip = e.target.closest('.info-tip');
+  document.querySelectorAll('.info-tip.open').forEach(el => { if (el !== tip) el.classList.remove('open'); });
+  if (tip) { e.stopPropagation(); tip.classList.toggle('open'); }
+});
 
 // Returnerar en stjärna för den givna statkolumnen i spelloggen:
 // röd = karriärbäst, gul = bäst inom nuvarande filter (men inte karriärbäst).
@@ -1094,9 +1143,9 @@ function renderSeasonsTable(allRows) {
             <th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th>
             <th title="Offensiva fouls (totalt)">OF</th><th title="Tekniska/osportsliga fouls (totalt)">TF</th>
             <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-            <th title="Effective Field Goal %">eFG%</th>
-            <th title="True Shooting %">TS%</th>
-            <th title="Game Score">GmSc</th>
+            <th>eFG%${infoTip('efg')}</th>
+            <th>TS%${infoTip('ts')}</th>
+            <th>GmSc${infoTip('gmsc')}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1399,8 +1448,8 @@ function renderMatchPage(matchId) {
               <th>STL</th><th>BLK</th><th>TOV</th>
               <th title="Offensiva fouls">OF</th>
               <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-              <th title="Effective Field Goal%">eFG%</th>
-              <th title="Game Score">GmSc</th>
+              <th>eFG%${infoTip('efg')}</th>
+              <th>GmSc${infoTip('gmsc')}</th>
             </tr></thead>
             <tbody>${bodyRows}${totRow}</tbody>
           </table>
@@ -1872,12 +1921,12 @@ function renderTeamSeasonLeaders(teamName, year) {
 }
 
 // Sorterbar kolumnrubrik för spelmatchlogg
-function _glTh(col, label, title) {
+function _glTh(col, label, tipKey) {
   const active = _glSort.col === col;
   const ind = active ? (_glSort.dir < 0 ? ' ▼' : ' ▲') : '';
   const color = active ? ';color:#cce5ff' : '';
-  const tt = title ? ` title="${title}"` : '';
-  return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}"${tt}>${label}${ind}</th>`;
+  const tip = tipKey ? infoTip(tipKey) : '';
+  return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}">${label}${ind}${tip}</th>`;
 }
 
 function glSort(col) {
@@ -1972,7 +2021,7 @@ function renderGameLog(allRows) {
             <th title="Tekniska/osportsliga fouls">TF</th>
             <th>FG</th><th>3P</th><th>FT</th>
             ${_glTh('plus_minus','+/-')}
-            ${_glTh('gmsc','GmSc','Game Score')}
+            ${_glTh('gmsc','GmSc','gmsc')}
           </tr></thead>
           <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
         </table>
