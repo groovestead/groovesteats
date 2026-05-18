@@ -32,6 +32,7 @@ _TEAM_CANON = {
     "umeå basket":                   "Umeå Basket",            # självmapping
 
     "aik basket":                    "AIK",
+    "alvik bbk":                     "Alvik Basket",
     "alviks bbk":                    "Alvik Basket",
     "alvik basket":                  "Alvik Basket",           # självmapping
     "ik eos":                        "IK Eos",
