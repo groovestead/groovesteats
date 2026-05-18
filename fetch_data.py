@@ -38,23 +38,25 @@ from pathlib import Path
 
 # competition_id för SBL Dam per säsong (från Genius Sports).
 # Hittade via https://hosted.dcd.shared.geniussports.com/SBF/en/competition/{id}/statistics/team
+# OBS: Genius Sports visar startåret (t.ex. "2025" för säsong 25/26).
+# Vi lagrar SLUTÅRET som season_year (25/26 → 2026), precis som fmtSeason() förväntar sig.
 SEASONS = {
-    2010: 5959,
-    2011: 5961,
-    2012: 5960,
-    2013: 5968,
-    2014: 5969,
-    2015: 5970,
-    2016: 8524,
-    2017: 17548,
-    2018: 20995,
-    2019: 24009,
-    2020: 27660,
-    2021: 30967,
-    2022: 34105,
-    2023: 36406,
-    2024: 39557,
-    2025: 42013,
+    2011: 5959,
+    2012: 5961,
+    2013: 5960,
+    2014: 5968,
+    2015: 5969,
+    2016: 5970,
+    2017: 8524,
+    2018: 17548,
+    2019: 20995,
+    2020: 24009,
+    2021: 27660,
+    2022: 30967,
+    2023: 34105,
+    2024: 36406,
+    2025: 39557,
+    2026: 42013,
 }
 
 # URL-mönster
@@ -196,6 +198,15 @@ def open_db():
         conn.commit()
     except sqlite3.OperationalError:
         pass  # kolumnen finns redan
+
+    # Korrigera off-by-one i season_year: Genius Sports visar startår men vi vill ha slutår.
+    # Körs bara om competition 42013 fortfarande är märkt som år 2025 (gammalt felaktigt värde).
+    row = conn.execute("SELECT year FROM seasons WHERE competition_id = 42013").fetchone()
+    if row and row[0] == 2025:
+        conn.execute("UPDATE matches SET season_year = season_year + 1")
+        conn.execute("UPDATE seasons SET year = year + 1")
+        conn.commit()
+        print("  Korrigerade season_year (+1): Genius Sports startår → slutår för alla säsonger.")
 
     # Ta bort raw_json om den fortfarande finns (stod för ~99% av filstorleken).
     # DROP COLUMN kräver SQLite >= 3.35 (vi har 3.45).
