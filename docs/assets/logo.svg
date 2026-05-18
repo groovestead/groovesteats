@@ -5,8 +5,3 @@
     <tspan fill="#5cb894">groove</tspan><tspan fill="#5ba3d9">stats</tspan>
   </text>
 </svg>
-
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <rect x="0" y="0" width="32" height="32" rx="7" fill="#1a2332" stroke="#2a3a4d" stroke-width="0.5"/>
-  <text x="16" y="22" text-anchor="middle" fill="#5cb894" font-family="monospace" font-size="20" font-weight="500">g</text>
-</svg>
