@@ -126,6 +126,40 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   .player-name { font-size: 22px; }
   th, td { padding: 6px 8px; font-size: 13px; }
 }
+.info-tip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+  color: #6c7a8c;
+  font-size: 11px;
+  margin-left: 2px;
+  vertical-align: middle;
+  line-height: 1;
+}
+.info-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e2736;
+  border: 1px solid #2a3a4a;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 200;
+  color: #c8d0dc;
+  line-height: 1.5;
+  min-width: 200px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.info-tip:hover::after, .info-tip.open::after { opacity: 1; }
 </style>
 </head>
 <body>
@@ -165,6 +199,7 @@ let FINALS = [];          // [{year, champion, finalist, aborted}]
 let lastSearch = '';      // bevaras vid navigering tillbaka från spelare/lag-sida
 let COMPARE_KEY = null;   // spelare A i pågående jämförelse
 let recordsTab = 'current'; // 'current' | 'alltime'
+let _homeHighsYear = 'current'; // 'current' | 'alltime'
 let _pKey = null;             // current player page key
 let _pSeason = null;          // selected season year (null = all seasons)
 let _pPhase = null;           // selected phase: null | 'regular' | 'playoff'
@@ -174,6 +209,7 @@ let _pCareerBests = {};       // {field: {val, matchId}} always career-wide
 let _pFilteredRows = [];      // current filtered rows (season + phase)
 let _tName = null;            // current team page name
 let _tSeason = null;          // selected season year on team page (null = all)
+let _tLineups = {};           // cache: {teamName: {year: [...]}} loaded from lineups JSON
 
 const $main = document.getElementById('main');
 const $search = document.getElementById('search');
@@ -189,7 +225,11 @@ async function load() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     DATA = await r.json();
   } catch (e) {
-    $main.innerHTML = '<div class="empty"><p>Kunde inte ladda data: ' + escapeHtml(e.message) + '</p></div>';
+    $main.innerHTML = `<div class="empty">
+      <p>Kunde inte ladda statistikdata.</p>
+      <p style="font-size:13px;color:#9aa3b2">Fel: ${escapeHtml(e.message)}</p>
+      <p style="font-size:13px;color:#9aa3b2">Prova att ladda om sidan. Om felet kvarstår kan det bero på att datat håller på att uppdateras — försök igen om några minuter.</p>
+    </div>`;
     return;
   }
 
@@ -329,6 +369,21 @@ const TEAM_ABBREV = {
 function abbrevTeam(name) {
   return name ? (TEAM_ABBREV[name] || name.split(' ')[0]) : '';
 }
+
+const _TIPS = {
+  efg: 'Effective Field Goal %\nJusterar för att en trepoängare är värd mer än en tvåa.\n(FGM + 0,5 × 3PM) / FGA',
+  ts:  'True Shooting %\nTotalt skjutningseffektivitet inkl. fritkast.\nPTS / (2 × (FGA + 0,44 × FTA))',
+  gmsc:'Game Score (Hollinger)\nSamlat matchbetyg på en enda skala.\nPTS + 0,4×FG − 0,7×FGA − 0,4×(FTA−FT)\n+ 0,7×OR + 0,3×DR + STL + 0,7×AST + 0,7×BLK − 0,4×PF − TOV',
+};
+function infoTip(key) {
+  return `<span class="info-tip" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
+}
+// Stäng open-tooltip vid klick utanför; toggla vid klick på ikon (mobil)
+document.addEventListener('click', e => {
+  const tip = e.target.closest('.info-tip');
+  document.querySelectorAll('.info-tip.open').forEach(el => { if (el !== tip) el.classList.remove('open'); });
+  if (tip) { e.stopPropagation(); tip.classList.toggle('open'); }
+});
 
 // Returnerar en stjärna för den givna statkolumnen i spelloggen:
 // röd = karriärbäst, gul = bäst inom nuvarande filter (men inte karriärbäst).
@@ -551,6 +606,79 @@ function renderTodayMatches() {
     </div>`;
 }
 
+function renderSeasonHighs() {
+  const allYears = DATA.matches.map(m => m.year).filter(Boolean);
+  const currentYear = Math.max(...allYears);
+  const filterYear = _homeHighsYear === 'current' ? currentYear : null;
+
+  const CATS = [
+    {key:'points',    label:'PTS', fn: r => get(r,'points')},
+    {key:'reb',       label:'REB', fn: r => (get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0)},
+    {key:'assists',   label:'AST', fn: r => get(r,'assists')},
+    {key:'steals',    label:'STL', fn: r => get(r,'steals')},
+    {key:'blocks',    label:'BLK', fn: r => get(r,'blocks')},
+    {key:'three_made',label:'3PT', fn: r => get(r,'three_made')},
+  ];
+
+  const highs = {};
+  for (const r of DATA.stats) {
+    const m = MATCHES_BY_ID[get(r,'match_id')];
+    if (!m) continue;
+    if (filterYear && m.year !== filterYear) continue;
+    for (const cat of CATS) {
+      const v = cat.fn(r);
+      if (v == null || v <= 0) continue;
+      if (!highs[cat.key] || v > highs[cat.key].val) {
+        highs[cat.key] = {val: v, pkey: get(r,'player_key'), team: get(r,'team_name'), mid: get(r,'match_id'), year: m.year};
+      }
+    }
+  }
+
+  const items = CATS.map(cat => {
+    const h = highs[cat.key];
+    if (!h) return '';
+    const player = PLAYERS_BY_KEY[h.pkey];
+    const name = player ? fullName(player) : h.pkey;
+    const m = MATCHES_BY_ID[h.mid];
+    const opp = m && h.team ? (h.team === m.home ? m.away : m.home) : '';
+    const parts = [];
+    if (opp) parts.push(`mot ${abbrevTeam(opp)}`);
+    if (!filterYear && m) parts.push(fmtSeason(m.year));
+    return `<div style="min-width:0">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6c7a8c;margin-bottom:4px">${cat.label}</div>
+      <div style="font-size:26px;font-weight:700;color:#ffd700;line-height:1.1">${h.val}</div>
+      <div style="margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <a href="#/player/${encodeURIComponent(h.pkey)}" style="font-size:13px;font-weight:600">${escapeHtml(name)}</a>
+      </div>
+      <div style="font-size:11px;color:#9aa3b2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(opp)}">${escapeHtml(parts.join(' · '))}</div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  const tabStyle = active =>
+    `cursor:pointer;padding:5px 12px;border-radius:14px;font-size:13px;font-weight:600;border:none;` +
+    (active ? 'background:#1a3a5c;color:#e8edf4;' : 'background:transparent;color:#9aa3b2;');
+  const isCurrent = _homeHighsYear === 'current';
+
+  return `
+    <div id="home-highs-wrapper">
+      <div class="section">
+        <h2>Säsongsrekord — enskild match</h2>
+        <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;margin-bottom:12px">
+          <button style="${tabStyle(isCurrent)}"  onclick="_homeHighsYear='current';rerenderHomeHighs()">Säsong ${fmtSeason(currentYear)}</button>
+          <button style="${tabStyle(!isCurrent)}" onclick="_homeHighsYear='alltime';rerenderHomeHighs()">Historik</button>
+        </div>
+        <div class="card">
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:20px">${items}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function rerenderHomeHighs() {
+  const el = document.getElementById('home-highs-wrapper');
+  if (el) el.outerHTML = renderSeasonHighs();
+}
+
 function renderSeasonLeaders() {
   const allYears = DATA.matches.map(m => m.year).filter(Boolean);
   const currentYear = Math.max(...allYears);
@@ -621,6 +749,7 @@ function renderSearchPage(query) {
         <p>Sök efter en spelare eller ett lag i rutan ovan.</p>
       </div>
       ${renderTodayMatches()}
+      ${renderSeasonHighs()}
       ${renderSeasonLeaders()}
       <div class="section">
         <h2>Lag (${allTeams.length})</h2>
@@ -1015,9 +1144,9 @@ function renderSeasonsTable(allRows) {
             <th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th>
             <th title="Offensiva fouls (totalt)">OF</th><th title="Tekniska/osportsliga fouls (totalt)">TF</th>
             <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-            <th title="Effective Field Goal %">eFG%</th>
-            <th title="True Shooting %">TS%</th>
-            <th title="Game Score">GmSc</th>
+            <th>eFG%${infoTip('efg')}</th>
+            <th>TS%${infoTip('ts')}</th>
+            <th>GmSc${infoTip('gmsc')}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1320,8 +1449,8 @@ function renderMatchPage(matchId) {
               <th>STL</th><th>BLK</th><th>TOV</th>
               <th title="Offensiva fouls">OF</th>
               <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-              <th title="Effective Field Goal%">eFG%</th>
-              <th title="Game Score">GmSc</th>
+              <th>eFG%${infoTip('efg')}</th>
+              <th>GmSc${infoTip('gmsc')}</th>
             </tr></thead>
             <tbody>${bodyRows}${totRow}</tbody>
           </table>
@@ -1601,6 +1730,82 @@ function renderRecordsPage() {
 }
 
 // =============================================================================
+// Render: lagsida — femmannor (lineups)
+// =============================================================================
+
+async function loadAndRenderLineups(teamName) {
+  const el = document.getElementById('team-lineups');
+  if (!el) return;
+
+  // Use cache
+  if (!_tLineups[teamName]) {
+    const encoded = encodeURIComponent(teamName);
+    try {
+      const r = await fetch(`./lineups/${encoded}.json`);
+      if (!r.ok) { el.innerHTML = ''; return; }
+      _tLineups[teamName] = await r.json();
+    } catch (e) {
+      el.innerHTML = '';
+      return;
+    }
+  }
+
+  el.innerHTML = renderLineupsSection(teamName, _tLineups[teamName]);
+}
+
+function renderLineupsSection(teamName, allData) {
+  const year = _tSeason;
+  const key = year ? String(year) : null;
+
+  // Find available years (newest first)
+  const years = Object.keys(allData).map(Number).sort((a, b) => b - a);
+  if (!years.length) return '';
+
+  // Use selected season, or most recent that has data
+  const useYear = (key && allData[key]) ? key : String(years[0]);
+  const rows = allData[useYear] || [];
+
+  if (!rows.length) return '';
+
+  const tableRows = rows.map((lu, i) => {
+    const names = lu.players.map(pk => {
+      const p = PLAYERS_BY_KEY[pk];
+      const name = p ? fullName(p) : pk.split('|').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+      return `<a href="#/player/${encodeURIComponent(pk)}">${escapeHtml(name)}</a>`;
+    }).join(', ');
+    const mins = (lu.secs / 60).toFixed(1);
+    const pmStr = lu.pm > 0 ? `+${lu.pm}` : String(lu.pm);
+    const pmColor = lu.pm > 0 ? 'color:#6cb6ff' : lu.pm < 0 ? 'color:#ff8b8b' : 'color:#9aa3b2';
+    return `<tr class="match">
+      <td class="muted" style="width:20px">${i + 1}</td>
+      <td style="text-align:left">${names}</td>
+      <td>${mins}</td>
+      <td style="${pmColor}">${pmStr}</td>
+      <td>${lu.games}</td>
+    </tr>`;
+  }).join('');
+
+  const seasonLabel = _tSeason ? `Säsong ${fmtSeason(Number(useYear))}` : `Säsong ${fmtSeason(Number(useYear))} (senaste)`;
+
+  return `
+    <div class="section">
+      <h2>Vanligaste femmannor — ${seasonLabel}</h2>
+      <div class="card scroll-x">
+        <table>
+          <thead><tr>
+            <th style="width:20px">#</th>
+            <th style="text-align:left">Spelare</th>
+            <th>Min</th>
+            <th>+/−</th>
+            <th>Matcher</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// =============================================================================
 // Render: lagsida
 // =============================================================================
 
@@ -1618,6 +1823,11 @@ function filterTeamPage(year) {
   // Uppdatera ledaravsnittet
   const div = document.getElementById('team-leaders');
   if (div) div.innerHTML = renderTeamSeasonLeaders(_tName, _tSeason);
+  // Uppdatera femmannavsnittet om data redan är cachad
+  const el = document.getElementById('team-lineups');
+  if (el && _tLineups[_tName]) {
+    el.innerHTML = renderLineupsSection(_tName, _tLineups[_tName]);
+  }
 }
 
 function renderTeamPage(teamName) {
@@ -1714,10 +1924,12 @@ function renderTeamPage(teamName) {
       <button class="t-season-btn" data-year="all" style="${btnStyle(_tSeason===null)}" onclick="filterTeamPage(null)">Alla säsonger</button>
       ${seasonBtns}
     </div>
-    <div id="team-leaders">${renderTeamSeasonLeaders(teamName, _tSeason)}</div>`;
+    <div id="team-leaders">${renderTeamSeasonLeaders(teamName, _tSeason)}</div>
+    <div id="team-lineups"></div>`;
 
   $main.innerHTML = html;
   window.scrollTo(0, 0);
+  loadAndRenderLineups(teamName);  // async, fills in after page renders
 }
 
 function renderTeamSeasonLeaders(teamName, year) {
@@ -1793,12 +2005,12 @@ function renderTeamSeasonLeaders(teamName, year) {
 }
 
 // Sorterbar kolumnrubrik för spelmatchlogg
-function _glTh(col, label, title) {
+function _glTh(col, label, tipKey) {
   const active = _glSort.col === col;
   const ind = active ? (_glSort.dir < 0 ? ' ▼' : ' ▲') : '';
   const color = active ? ';color:#cce5ff' : '';
-  const tt = title ? ` title="${title}"` : '';
-  return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}"${tt}>${label}${ind}</th>`;
+  const tip = tipKey ? infoTip(tipKey) : '';
+  return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}">${label}${ind}${tip}</th>`;
 }
 
 function glSort(col) {
@@ -1893,7 +2105,7 @@ function renderGameLog(allRows) {
             <th title="Tekniska/osportsliga fouls">TF</th>
             <th>FG</th><th>3P</th><th>FT</th>
             ${_glTh('plus_minus','+/-')}
-            ${_glTh('gmsc','GmSc','Game Score')}
+            ${_glTh('gmsc','GmSc','gmsc')}
           </tr></thead>
           <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
         </table>

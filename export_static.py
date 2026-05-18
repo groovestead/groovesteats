@@ -10,6 +10,7 @@ Resultat: docs/data.json
 
 import json
 import sqlite3
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -176,12 +177,197 @@ STAT_FIELDS = [
 ]
 
 
+def parse_gt(gt_str):
+    """Parse "MM:SS" countdown to seconds."""
+    try:
+        m, s = gt_str.split(':')
+        return int(m) * 60 + int(s)
+    except Exception:
+        return 0
+
+
+def period_secs(period):
+    return 600 if period <= 4 else 300
+
+
+def _process_lineup(events, tno, starters):
+    """
+    Walk PBP events for team `tno` (1=home, 2=away).
+    Returns list of (frozenset_of_player_keys, seconds_on_court, plus_minus).
+    """
+    lineup = set(starters)
+    cur_period = None
+    cur_gt = None
+    cur_sdiff = None
+    last_s1 = last_s2 = 0
+    segments = []
+
+    i = 0
+    while i < len(events):
+        ev = events[i]
+        if len(ev) < 10:
+            i += 1
+            continue
+
+        ev_period, ev_gt_str, ev_tno, ev_type, ev_sub = ev[0], ev[1], ev[2], ev[3], ev[4]
+        s1, s2 = ev[6] or 0, ev[7] or 0
+        fn, ln = (ev[8] or '').strip(), (ev[9] or '').strip()
+        ev_gt = parse_gt(ev_gt_str)
+        ev_sdiff = (s1 - s2) if tno == 1 else (s2 - s1)
+        last_s1, last_s2 = s1, s2
+
+        if cur_period is None:
+            cur_period = ev_period
+            cur_gt = period_secs(ev_period)
+            cur_sdiff = ev_sdiff
+
+        # Period change: close current segment at gt=0
+        if ev_period != cur_period:
+            duration = cur_gt
+            if duration > 0 and len(lineup) == 5:
+                segments.append((frozenset(lineup), duration, ev_sdiff - cur_sdiff))
+            cur_period = ev_period
+            cur_gt = period_secs(ev_period)
+            cur_sdiff = ev_sdiff
+
+        # Substitution for our team: batch all subs at the same timestamp
+        if ev_type == 'substitution' and ev_tno == tno:
+            cur_key = (ev_period, ev_gt_str)
+            pending_out, pending_in = [], []
+            j = i
+            while j < len(events):
+                jev = events[j]
+                if len(jev) < 10 or (jev[0], jev[1]) != cur_key or jev[3] != 'substitution' or jev[2] != tno:
+                    break
+                pkey = f"{(jev[8] or '').strip().lower()}|{(jev[9] or '').strip().lower()}"
+                if jev[4] == 'out':
+                    pending_out.append(pkey)
+                elif jev[4] == 'in':
+                    pending_in.append(pkey)
+                j += 1
+            # Record segment up to this sub
+            duration = cur_gt - ev_gt
+            if duration > 0 and len(lineup) == 5:
+                segments.append((frozenset(lineup), duration, ev_sdiff - cur_sdiff))
+            for p in pending_out:
+                lineup.discard(p)
+            for p in pending_in:
+                lineup.add(p)
+            cur_gt = ev_gt
+            cur_sdiff = ev_sdiff
+            i = j
+            continue
+        i += 1
+
+    # Final segment
+    if cur_gt and cur_gt > 0 and len(lineup) == 5:
+        final_sdiff = (last_s1 - last_s2) if tno == 1 else (last_s2 - last_s1)
+        segments.append((frozenset(lineup), cur_gt, final_sdiff - cur_sdiff))
+
+    return segments
+
+
+def compute_and_write_lineups(conn, pbp_dir, out_dir):
+    """Compute lineups from PBP data and write docs/lineups/{team}.json files."""
+    # Build starters index: {(match_id, canonical_team_name): set of player_keys}
+    starters_idx = {}
+    for row in conn.execute(
+        "SELECT match_id, team_name, player_key FROM player_match_stats WHERE is_starter = 1"
+    ):
+        mid, team, pk = row
+        k = (mid, canonical_team(team))
+        if k not in starters_idx:
+            starters_idx[k] = set()
+        starters_idx[k].add(pk)
+
+    # Build match index
+    matches_idx = {}
+    for row in conn.execute("SELECT match_id, season_year FROM matches"):
+        matches_idx[row[0]] = row[1]
+
+    # result[canonical_team][year][lineup_tuple] = {'secs': X, 'pm': Y, 'games': set()}
+    result = {}
+
+    count = 0
+    for pbp_row in conn.execute("SELECT match_id, pbp_json FROM match_pbp"):
+        mid, pbp_raw = pbp_row[0], pbp_row[1]
+        if not pbp_raw:
+            continue
+        try:
+            pbp = json.loads(pbp_raw)
+        except Exception:
+            continue
+        year = matches_idx.get(mid)
+        if not year:
+            continue
+
+        events = pbp.get('ev', [])
+        t1_raw = pbp.get('t1', '')
+        t2_raw = pbp.get('t2', '')
+
+        for tno, team_raw in [(1, t1_raw), (2, t2_raw)]:
+            team_canon = canonical_team(team_raw)
+            starters = starters_idx.get((mid, team_canon))
+            if not starters or len(starters) != 5:
+                continue
+
+            segments = _process_lineup(events, tno, starters)
+            if not segments:
+                continue
+
+            if team_canon not in result:
+                result[team_canon] = {}
+            if year not in result[team_canon]:
+                result[team_canon][year] = {}
+
+            yr = result[team_canon][year]
+            for (lineup_fs, secs, pm) in segments:
+                key = tuple(sorted(lineup_fs))
+                if len(key) != 5:
+                    continue
+                if key not in yr:
+                    yr[key] = {'secs': 0, 'pm': 0, 'games': set()}
+                yr[key]['secs'] += secs
+                yr[key]['pm'] += pm
+                yr[key]['games'].add(mid)
+        count += 1
+
+    # Write per-team files
+    lineups_dir = out_dir / 'lineups'
+    lineups_dir.mkdir(parents=True, exist_ok=True)
+
+    files_written = 0
+    for team_canon, years_data in result.items():
+        out = {}
+        for year, lineups in years_data.items():
+            rows = []
+            for players_tuple, stats in lineups.items():
+                rows.append({
+                    'players': list(players_tuple),
+                    'secs': round(stats['secs']),
+                    'pm': stats['pm'],
+                    'games': len(stats['games']),
+                })
+            rows.sort(key=lambda r: r['secs'], reverse=True)
+            out[str(year)] = rows[:50]  # top 50 lineups per season
+        fname = urllib.parse.quote(team_canon, safe='') + '.json'
+        with open(lineups_dir / fname, 'w', encoding='utf-8') as f:
+            json.dump(out, f, separators=(',', ':'), ensure_ascii=False)
+        files_written += 1
+
+    print(f"  Lineups: bearbetade {count} matcher, skrev {files_written} lagfiler i docs/lineups/")
+
+
 def main():
     if not DB_PATH.exists():
-        raise SystemExit(f"Hittar inte databasen: {DB_PATH}")
+        raise SystemExit(f"Hittar inte databasen: {DB_PATH}\nKör fetch_data.py först.")
 
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+
+    match_count = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+    if match_count == 0:
+        print("Varning: databasen innehåller inga matcher. Kör fetch_data.py för att hämta data.")
 
     # Spelare
     players = []
@@ -271,6 +457,8 @@ def main():
 
     print(f"  PBP: {pbp_count} matchfiler i docs/pbp/")
     print(f"  PBP fouls: {len(pbp_fouls)} spelare/match-rader (OFF/TF/UNSPORT)")
+
+    compute_and_write_lineups(conn, pbp_dir, OUT_DIR)
 
     finals = [
         {"year": yr, "champion": ch, "finalist": fn, "aborted": ab}

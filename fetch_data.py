@@ -128,7 +128,6 @@ CREATE TABLE IF NOT EXISTS matches (
     home_score INTEGER,
     away_score INTEGER,
     attendance INTEGER,
-    raw_json TEXT,
     fetched_at TEXT
 );
 
@@ -197,6 +196,16 @@ def open_db():
         conn.commit()
     except sqlite3.OperationalError:
         pass  # kolumnen finns redan
+
+    # Ta bort raw_json om den fortfarande finns (stod för ~99% av filstorleken).
+    # DROP COLUMN kräver SQLite >= 3.35 (vi har 3.45).
+    try:
+        conn.execute("ALTER TABLE matches DROP COLUMN raw_json")
+        conn.commit()
+        conn.execute("VACUUM")
+        print("  Droppade raw_json och körde VACUUM — databasen är nu betydligt mindre.")
+    except sqlite3.OperationalError:
+        pass  # kolumnen finns inte längre
 
     # Fyll i parsed_date för befintliga rader som saknar värdet.
     rows = conn.execute(
@@ -412,14 +421,14 @@ def save_match(conn, match_id, competition_id, season_year, schedule_info, data)
             ),
         )
 
-    # Match-rad (raw_json sparas ej längre — PBP hanteras separat)
+    # Match-rad
     match_date = schedule_info.get("date")
     cur.execute(
         """INSERT OR REPLACE INTO matches (
               match_id, competition_id, season_year, match_date, parsed_date, venue,
               status, home_team, away_team, home_score, away_score,
-              attendance, raw_json, fetched_at, phase
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'), ?)""",
+              attendance, fetched_at, phase
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)""",
         (
             match_id,
             competition_id,
@@ -535,8 +544,14 @@ def run(seasons_to_fetch, limit_per_season=None):
         print(f"\n=== Säsong {year} (competition_id {cid}) ===")
         try:
             html = http_get(SCHEDULE_URL.format(cid=cid))
+        except urllib.error.HTTPError as e:
+            print(f"  Kunde inte hämta schema för {year}: servern svarade {e.code} {e.reason}")
+            continue
+        except urllib.error.URLError as e:
+            print(f"  Kunde inte hämta schema för {year}: nätverksfel — {e.reason}")
+            continue
         except Exception as e:
-            print(f"  Kunde inte hämta schema för {year}: {e}")
+            print(f"  Kunde inte hämta schema för {year}: oväntat fel — {e}")
             continue
 
         schedule = parse_schedule(html)
@@ -576,10 +591,17 @@ def run(seasons_to_fetch, limit_per_season=None):
                 total_new += 1
                 print(f"  [{i}/{len(to_fetch)}] match {mid} — {info.get('date','?')} ✓")
             except urllib.error.HTTPError as e:
-                print(f"  [{i}/{len(to_fetch)}] match {mid} — HTTP-fel {e.code}")
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — HTTP {e.code} {e.reason}")
+                total_failed += 1
+            except urllib.error.URLError as e:
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — nätverksfel: {e.reason}")
+                total_failed += 1
+            except json.JSONDecodeError as e:
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — ogiltig JSON: {e}")
                 total_failed += 1
             except Exception as e:
-                print(f"  [{i}/{len(to_fetch)}] match {mid} — fel: {e}")
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — oväntat fel: {e}")
+                total_failed += 1
                 total_failed += 1
 
             time.sleep(DELAY_BETWEEN_MATCHES)
