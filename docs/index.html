@@ -160,6 +160,7 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   letter-spacing: 0;
 }
 .info-tip:hover::after, .info-tip.open::after { opacity: 1; }
+.info-tip.tip-left::after { left: auto; right: 0; transform: none; }
 </style>
 </head>
 <body>
@@ -375,8 +376,8 @@ const _TIPS = {
   ts:  'True Shooting %\nTotalt skjutningseffektivitet inkl. fritkast.\nPTS / (2 × (FGA + 0,44 × FTA))',
   gmsc:'Game Score (Hollinger)\nSamlat matchbetyg på en enda skala.\nPTS + 0,4×FG − 0,7×FGA − 0,4×(FTA−FT)\n+ 0,7×OR + 0,3×DR + STL + 0,7×AST + 0,7×BLK − 0,4×PF − TOV',
 };
-function infoTip(key) {
-  return `<span class="info-tip" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
+function infoTip(key, cls = '') {
+  return `<span class="info-tip${cls ? ' '+cls : ''}" data-tip="${escapeHtml(_TIPS[key])}" tabindex="0">ⓘ</span>`;
 }
 // Stäng open-tooltip vid klick utanför; toggla vid klick på ikon (mobil)
 document.addEventListener('click', e => {
@@ -1095,13 +1096,6 @@ function renderSeasonsTable(allRows) {
     const rs = bySeason[y];
     const reb = rs.map(r => (get(r,'rebounds_def')||0) + (get(r,'rebounds_off')||0));
     const rebAvg = reb.length ? reb.reduce((a,b)=>a+b,0)/reb.length : null;
-    let totalOff = 0, totalTech = 0;
-    for (const r of rs) {
-      const pf = getPbpFouls(get(r,'player_key'), get(r,'match_id'));
-      if (pf) { totalOff += pf[0]; totalTech += pf[1] + pf[2]; }
-    }
-    const ofCell = totalOff ? `<td style="color:#ff8b8b">${totalOff}</td>` : '<td class="muted">0</td>';
-    const tfCell = totalTech ? `<td style="color:#ff8b8b">${totalTech}</td>` : '<td class="muted">0</td>';
     // Avancerade effektivitetsmått aggregerade över säsongen
     const fgMadeTot = rs.reduce((s,r)=>s+(get(r,'fg_made')||0),0);
     const fgAttTot  = rs.reduce((s,r)=>s+(get(r,'fg_att')||0),0);
@@ -1122,8 +1116,6 @@ function renderSeasonsTable(allRows) {
         <td>${fmt(avg(rs,'steals'))}</td>
         <td>${fmt(avg(rs,'blocks'))}</td>
         <td>${fmt(avg(rs,'turnovers'))}</td>
-        ${ofCell}
-        ${tfCell}
         <td>${fmt(avg(rs,'fg_made'))}/${fmt(avg(rs,'fg_att'))}</td>
         <td>${fmt(avg(rs,'three_made'))}/${fmt(avg(rs,'three_att'))}</td>
         <td>${fmt(avg(rs,'ft_made'))}/${fmt(avg(rs,'ft_att'))}</td>
@@ -1142,11 +1134,10 @@ function renderSeasonsTable(allRows) {
           <thead><tr>
             <th>Säsong</th><th>Matcher</th>
             <th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th>
-            <th title="Offensiva fouls (totalt)">OF</th><th title="Tekniska/osportsliga fouls (totalt)">TF</th>
             <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-            <th>eFG%${infoTip('efg')}</th>
-            <th>TS%${infoTip('ts')}</th>
-            <th>GmSc${infoTip('gmsc')}</th>
+            <th>eFG%${infoTip('efg','tip-left')}</th>
+            <th>TS%${infoTip('ts','tip-left')}</th>
+            <th>GmSc${infoTip('gmsc','tip-left')}</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1449,8 +1440,8 @@ function renderMatchPage(matchId) {
               <th>STL</th><th>BLK</th><th>TOV</th>
               <th title="Offensiva fouls">OF</th>
               <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-              <th>eFG%${infoTip('efg')}</th>
-              <th>GmSc${infoTip('gmsc')}</th>
+              <th>eFG%${infoTip('efg','tip-left')}</th>
+              <th>GmSc${infoTip('gmsc','tip-left')}</th>
             </tr></thead>
             <tbody>${bodyRows}${totRow}</tbody>
           </table>
@@ -2005,11 +1996,11 @@ function renderTeamSeasonLeaders(teamName, year) {
 }
 
 // Sorterbar kolumnrubrik för spelmatchlogg
-function _glTh(col, label, tipKey) {
+function _glTh(col, label, tipKey, tipCls = '') {
   const active = _glSort.col === col;
   const ind = active ? (_glSort.dir < 0 ? ' ▼' : ' ▲') : '';
   const color = active ? ';color:#cce5ff' : '';
-  const tip = tipKey ? infoTip(tipKey) : '';
+  const tip = tipKey ? infoTip(tipKey, tipCls) : '';
   return `<th onclick="glSort('${col}')" style="cursor:pointer;user-select:none${color}">${label}${ind}${tip}</th>`;
 }
 
@@ -2105,7 +2096,7 @@ function renderGameLog(allRows) {
             <th title="Tekniska/osportsliga fouls">TF</th>
             <th>FG</th><th>3P</th><th>FT</th>
             ${_glTh('plus_minus','+/-')}
-            ${_glTh('gmsc','GmSc','gmsc')}
+            ${_glTh('gmsc','GmSc','gmsc','tip-left')}
           </tr></thead>
           <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
         </table>
