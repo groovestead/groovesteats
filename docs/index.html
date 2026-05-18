@@ -193,7 +193,7 @@ let TEAMS_DATA = {};      // {teamName: {name, seasons:[{year,wins,losses,ptsFor
 let FINALS = [];          // [{year, champion, finalist, aborted}]
 let lastSearch = '';      // bevaras vid navigering tillbaka från spelare/lag-sida
 let COMPARE_KEY = null;   // spelare A i pågående jämförelse
-let recordsTab = 'current'; // 'current' | 'alltime'
+let recordsTab = null; // null = currentYear | number = specific year | 'alltime'
 let _homeHighsYear = 'current'; // 'current' | 'alltime'
 let _pKey = null;             // current player page key
 let _pSeason = null;          // selected season year (null = all seasons)
@@ -1688,62 +1688,70 @@ function renderRecordsPage() {
     return miniTable(title, rows);
   }
 
-  // --- Data ---
-  const psNow      = playerSeasonStats(currentYear);
-  const psAll      = playerSeasonStats(null);
-  const tsAll      = teamSeasonStats(null);
-  const curStats   = DATA.stats.filter(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.year === currentYear; });
-  const curTeamGames = teamGames.filter(tg => tg.year === currentYear);
   const CATS  = ['pts','reb','ast','stl','blk','fg3'];
   const TCATS = ['pts','reb','ast','stl','blk'];
   const LABELS = {pts:'Poäng', reb:'Returer', ast:'Assists', stl:'Steals', blk:'Blocks', fg3:'Trepoängare'};
 
+  // Available years sorted newest first
+  const availYears = [...new Set(allYears)].sort((a,b) => b-a);
+  const selectedYear = (recordsTab === 'alltime') ? null : (recordsTab || currentYear);
+  const isAllTime = selectedYear === null;
+
   // --- Tab-bar ---
-  const isCurrent = recordsTab === 'current';
   const tabStyle = active => `cursor:pointer;padding:6px 14px;border-radius:16px;font-size:13px;font-weight:600;border:none;` +
     (active ? 'background:#1a3a5c;color:#e8edf4;' : 'background:transparent;color:#9aa3b2;');
+
+  const seasonBtns = availYears.map(y =>
+    `<button style="${tabStyle(selectedYear === y)}" onclick="recordsTab=${y};renderRecordsPage()">${fmtSeason(y)}</button>`
+  ).join('');
 
   let html = `
     <div style="margin-bottom:16px">${backLink()}</div>
     <div style="margin-bottom:24px">
       <h1 style="margin:0 0 16px">Rekordbok</h1>
-      <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content">
-        <button style="${tabStyle(isCurrent)}" onclick="recordsTab='current';renderRecordsPage()">Säsong ${fmtSeason(currentYear)}</button>
-        <button style="${tabStyle(!isCurrent)}" onclick="recordsTab='alltime';renderRecordsPage()">Alla tider</button>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;background:#161f2e;border-radius:20px;padding:4px;width:fit-content">
+        ${seasonBtns}
+        <button style="${tabStyle(isAllTime)}" onclick="recordsTab='alltime';renderRecordsPage()">Alla tider</button>
       </div>
     </div>`;
 
-  if (isCurrent) {
+  // --- Data for selected view ---
+  const psSelected    = playerSeasonStats(selectedYear);
+  const tsSelected    = teamSeasonStats(selectedYear);
+  const statsSelected = isAllTime ? DATA.stats : DATA.stats.filter(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.year === selectedYear; });
+  const teamGamesSelected = isAllTime ? teamGames : teamGames.filter(tg => tg.year === selectedYear);
+
+  if (!isAllTime) {
     html += `
       <div class="section">
         <h2>Individuellt — säsongssnitt</h2>
-        <div class="card">${recordGrid(CATS.map(c => playerAvgTable(psNow, c, LABELS[c]+'/match', false)))}</div>
+        <div class="card">${recordGrid(CATS.map(c => playerAvgTable(psSelected, c, LABELS[c]+'/match', false)))}</div>
       </div>
       <div class="section">
         <h2>Individuellt — bästa match</h2>
-        <div class="card">${recordGrid(CATS.map(c => playerGameTable(curStats, c, LABELS[c], false)))}</div>
+        <div class="card">${recordGrid(CATS.map(c => playerGameTable(statsSelected, c, LABELS[c], false)))}</div>
       </div>
       <div class="section">
         <h2>Lag — bästa match</h2>
-        <div class="card">${recordGrid(TCATS.map(c => teamGameTable(curTeamGames, c, LABELS[c], false)))}</div>
+        <div class="card">${recordGrid(TCATS.map(c => teamGameTable(teamGamesSelected, c, LABELS[c], false)))}</div>
       </div>`;
   } else {
     html += `
       <div class="section">
         <h2>Individuellt — bäst säsongssnitt</h2>
-        <div class="card">${recordGrid(CATS.map(c => playerAvgTable(psAll, c, LABELS[c]+'/match', true)))}</div>
+        <div class="card">${recordGrid(CATS.map(c => playerAvgTable(psSelected, c, LABELS[c]+'/match', true)))}</div>
       </div>
       <div class="section">
         <h2>Individuellt — bästa match</h2>
-        <div class="card">${recordGrid(CATS.map(c => playerGameTable(DATA.stats, c, LABELS[c], true)))}</div>
+        <div class="card">${recordGrid(CATS.map(c => playerGameTable(statsSelected, c, LABELS[c], true)))}</div>
       </div>
       <div class="section">
         <h2>Lag — bäst säsongssnitt</h2>
-        <div class="card">${recordGrid(TCATS.map(c => teamAvgTable(tsAll, c, LABELS[c]+'/match')))}</div>
+        <div class="card">${recordGrid(TCATS.map(c => teamAvgTable(tsSelected, c, LABELS[c]+'/match')))}</div>
       </div>
       <div class="section">
         <h2>Lag — bästa match</h2>
-        <div class="card">${recordGrid(TCATS.map(c => teamGameTable(teamGames, c, LABELS[c], true)))}</div>
+        <div class="card">${recordGrid(TCATS.map(c => teamGameTable(teamGamesSelected, c, LABELS[c], true)))}</div>
       </div>`;
   }
 
