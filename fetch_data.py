@@ -267,35 +267,28 @@ VENUE_RE = re.compile(
     r'class="venuename"[^>]*>(?P<venue>[^<]+)</a>',
 )
 
-# Matchar h2–h4-rubriker i schemasidans HTML (t.ex. "Grundserie", "Slutspel").
-HEADING_RE = re.compile(r'<h[2-4][^>]*>(.*?)</h[2-4]>', re.IGNORECASE | re.DOTALL)
-_STRIP_TAGS_RE = re.compile(r'<[^>]+>')
-
-
-def _phase_from_heading(html_content):
-    """Extrahera fas (regular/playoff) ur en HTML-rubriktext."""
-    text = _STRIP_TAGS_RE.sub('', html_content).strip().lower()
-    if re.search(r'slutspel|playoff|semifinal|kvartsfinal|final', text):
-        return 'playoff'
-    if re.search(r'grundserie|regular', text):
-        return 'regular'
-    return None
-
-
 def parse_schedule(html):
     """Plocka ut alla matcher ur schemasidans HTML.
 
     Returnerar en lista med dicts: {match_id, status, date, venue, phase}.
+
+    Genius Sports schemasida innehåller inga fas-rubriker. Däremot tilldelas
+    grundseriematcher och slutspelsmatcher i separata batchar i deras system,
+    vilket ger ett stort gap (vanligtvis >50 000) i match-ID-sekvensen.
+    Vi utnyttjar det gapet: allt med lägre ID = grundserie, resten = slutspel.
+    Om inget sådant gap finns (t.ex. äldre säsonger utan slutspelsdata) sätts
+    phase till None.
     """
     matches = []
     starts = list(MATCH_WRAP_RE.finditer(html))
 
-    # Bygg en lista med (position, fas) för alla rubriker med känd fas.
-    headings = [
-        (m.start(), _phase_from_heading(m.group(1)))
-        for m in HEADING_RE.finditer(html)
-    ]
-    headings = [(pos, ph) for pos, ph in headings if ph]
+    # Hitta playoff-tröskel via ID-gap.
+    all_ids = sorted(int(m.group("mid")) for m in starts)
+    playoff_threshold = None
+    for i in range(1, len(all_ids)):
+        if all_ids[i] - all_ids[i - 1] > 50_000:
+            playoff_threshold = all_ids[i]
+            break
 
     for i, m in enumerate(starts):
         block_start = m.start()
@@ -304,16 +297,17 @@ def parse_schedule(html):
 
         date_m = DATE_RE.search(block)
         venue_m = VENUE_RE.search(block)
+        mid = int(m.group("mid"))
 
-        # Senaste rubriken före detta matchblock avgör fas.
-        phase = None
-        for hpos, hphase in reversed(headings):
-            if hpos < block_start:
-                phase = hphase
-                break
+        if playoff_threshold is None:
+            phase = None
+        elif mid < playoff_threshold:
+            phase = 'regular'
+        else:
+            phase = 'playoff'
 
         matches.append({
-            "match_id": int(m.group("mid")),
+            "match_id": mid,
             "status": m.group("status"),
             "date": date_m.group("date").strip() if date_m else None,
             "venue": venue_m.group("venue").strip() if venue_m else None,
