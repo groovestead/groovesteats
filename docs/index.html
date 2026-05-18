@@ -1770,7 +1770,9 @@ async function loadAndRenderLineups(teamName) {
 
   // Use cache
   if (!_tLineups[teamName]) {
-    const encoded = encodeURIComponent(teamName);
+    // Resolve to canonical team name (lineup files use canonical names)
+    const canon = (DATA.team_canon && DATA.team_canon[teamName]) || teamName;
+    const encoded = encodeURIComponent(canon);
     try {
       const r = await fetch(`./lineups/${encoded}.json`);
       if (!r.ok) { el.innerHTML = ''; return; }
@@ -1798,7 +1800,7 @@ function renderLineupsSection(teamName, allData) {
 
   if (!rows.length) return '';
 
-  const tableRows = rows.map((lu, i) => {
+  const tableRows = rows.slice(0, 5).map((lu, i) => {
     const names = lu.players.map(pk => {
       const p = PLAYERS_BY_KEY[pk];
       const name = p ? fullName(p) : pk.split('|').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
@@ -1820,7 +1822,7 @@ function renderLineupsSection(teamName, allData) {
 
   return `
     <div class="section">
-      <h2>Vanligaste femmannor — ${seasonLabel}</h2>
+      <h2>Vanligaste femmor — ${seasonLabel}</h2>
       <div class="card scroll-x">
         <table>
           <thead><tr>

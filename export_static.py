@@ -465,6 +465,13 @@ def main():
         for yr, ch, fn, ab in _FINALS_HISTORY
     ]
 
+    # Bygg en mappning rånamn → kanoniskt namn för alla lag som förekommer i matcher
+    team_canon_map = {}
+    for m in conn.execute("SELECT DISTINCT home_team, away_team FROM matches"):
+        for raw in m:
+            if raw:
+                team_canon_map[raw] = canonical_team(raw)
+
     data = {
         "meta": {
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -474,6 +481,7 @@ def main():
             "stat_count": len(stats),
         },
         "stat_fields": STAT_FIELDS,
+        "team_canon": team_canon_map,
         "players": players,
         "matches": matches,
         "stats": stats,
