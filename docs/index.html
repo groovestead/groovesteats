@@ -314,6 +314,19 @@ function gmsc(r) {
     - (get(r,'turnovers')||0);
 }
 
+const TEAM_ABBREV = {
+  'Luleå Basket': 'Luleå', 'Södertälje BBK': 'SBBK', 'IK Eos': 'Eos',
+  'Alvik Basket': 'Alvik', 'Umeå Basket': 'Umeå', 'Högsbo': 'Högsbo',
+  'Norrköping Dolphins': 'NKP', 'RIG Luleå': 'RIG', 'Mark Basket': 'Mark',
+  'Uppsala Basket': 'Uppsala', 'AIK': 'AIK', 'Malbas': 'Malbas',
+  'Wetterbygdens Sparks': 'Sparks', 'Sjuhärads Basket': 'Sjuhärad',
+  'Östersund Basket': 'Östersund', 'Visby Ladies': 'Visby',
+  'Borås Basket': 'Borås', 'Brahe Basket': 'Brahe', 'Helsingborg BBK': 'Hbg',
+};
+function abbrevTeam(name) {
+  return name ? (TEAM_ABBREV[name] || name.split(' ')[0]) : '';
+}
+
 function fmtSeason(year) {
   const y = Number(year);
   return String((y - 1) % 100).padStart(2, '0') + '/' + String(y % 100).padStart(2, '0');
@@ -656,14 +669,14 @@ function computeBests(rows) {
   ];
   const bests = {};
   for (const cat of BEST_CATS) {
-    let bestVal = null, bestMid = null;
+    let bestVal = null, bestMid = null, bestTeam = null;
     for (const r of rows) {
       const v = cat.fn(r);
       if (v != null && (bestVal === null || v > bestVal)) {
-        bestVal = v; bestMid = get(r,'match_id');
+        bestVal = v; bestMid = get(r,'match_id'); bestTeam = get(r,'team_name');
       }
     }
-    if (bestVal !== null) bests[cat.key] = {val: bestVal, matchId: bestMid, label: cat.label};
+    if (bestVal !== null) bests[cat.key] = {val: bestVal, matchId: bestMid, label: cat.label, team: bestTeam};
   }
   return bests;
 }
@@ -673,11 +686,12 @@ function renderBestsBox(bests, label) {
   if (!cells.length) return '';
   const items = cells.map(b => {
     const m = MATCHES_BY_ID[b.matchId];
-    const sub = m ? fmtSeason(m.year) : '';
+    const opp = m && b.team ? (b.team === m.home ? m.away : m.home) : '';
+    const sub = opp ? `mot ${escapeHtml(abbrevTeam(opp))}` : (m ? fmtSeason(m.year) : '');
     return `<div style="text-align:center">
       <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6c7a8c">${b.label}</div>
       <div style="font-size:22px;font-weight:700;color:#ffd700;line-height:1.2">${b.val}</div>
-      <div style="font-size:11px;color:#9aa3b2">${sub}</div>
+      <div style="font-size:11px;color:#9aa3b2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(opp)}">${sub}</div>
     </div>`;
   }).join('');
   return `
@@ -691,7 +705,7 @@ function renderBestsBox(bests, label) {
 
 function buildPlayerStats(rows) {
   _pBests = computeBests(rows);
-  const bestsLabel = _pSeason ? `Säsongen ${fmtSeason(_pSeason)} — bästa match` : 'Karriärbäst';
+  const bestsLabel = _pSeason ? `Säsongen ${fmtSeason(_pSeason)} — högsta notering` : 'Karriär — högsta notering';
   return renderBestsBox(_pBests, bestsLabel)
        + renderRecentVsSeason(rows)
        + renderSeasonsTable(rows)
@@ -1355,7 +1369,7 @@ function renderRecordsPage() {
     }));
   }
 
-  function topN(arr, field, n=5) {
+  function topN(arr, field, n=10) {
     return arr.filter(x => x[field] > 0).sort((a,b) => b[field]-a[field]).slice(0,n);
   }
 
@@ -1784,7 +1798,7 @@ function buildGlRows(allRows) {
     return `
       <tr class="match"${rowStyle}>
         ${starCell}
-        <td><a href="#/match/${mid}" style="color:inherit">${escapeHtml(m.date || '')}</a></td>
+        <td><a href="#/match/${mid}" style="color:inherit">${escapeHtml((m.date_parsed || m.date || '').slice(0, 10))}</a></td>
         <td class="muted">${result}</td>
         <td>${escapeHtml(get(r,'minutes') || '')}</td>
         <td>${fmtInt(get(r,'points'))}</td>
