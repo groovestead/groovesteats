@@ -210,7 +210,7 @@ def _process_lineup(events, tno, starters):
             continue
 
         ev_period, ev_gt_str, ev_tno, ev_type, ev_sub = ev[0], ev[1], ev[2], ev[3], ev[4]
-        s1, s2 = ev[6] or 0, ev[7] or 0
+        s1, s2 = int(ev[6] or 0), int(ev[7] or 0)
         fn, ln = (ev[8] or '').strip(), (ev[9] or '').strip()
         ev_gt = parse_gt(ev_gt_str)
         ev_sdiff = (s1 - s2) if tno == 1 else (s2 - s1)
