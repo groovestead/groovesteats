@@ -1,0 +1,35 @@
+name: Debug schedule-HTML
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Säsong att inspektera (t.ex. 2026)'
+        required: true
+        default: '2026'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cacha databasen
+        uses: actions/cache@v4
+        with:
+          path: sbl.db
+          key: sbl-db-v2
+
+      - name: Spara schedule-HTML
+        run: python3 fetch_data.py --season ${{ inputs.season }} --save-schedule --limit 1
+
+      - name: Ladda upp som artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-schedule-${{ inputs.season }}
+          path: debug_schedule_${{ inputs.season }}.html
+          retention-days: 7

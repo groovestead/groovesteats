@@ -535,7 +535,7 @@ def save_match(conn, match_id, competition_id, season_year, schedule_info, data)
 # Huvudslinga
 # -----------------------------------------------------------------------------
 
-def run(seasons_to_fetch, limit_per_season=None):
+def run(seasons_to_fetch, limit_per_season=None, save_schedule=False):
     conn = open_db()
 
     for year, cid in seasons_to_fetch:
@@ -568,6 +568,11 @@ def run(seasons_to_fetch, limit_per_season=None):
         schedule = parse_schedule(html)
         completed = [m for m in schedule if m["status"] == "COMPLETE"]
         print(f"  Schema: {len(schedule)} matcher totalt, {len(completed)} färdigspelade.")
+
+        if save_schedule:
+            debug_path = Path(__file__).parent / f"debug_schedule_{year}.html"
+            debug_path.write_text(html, encoding="utf-8")
+            print(f"  Sparade schema-HTML till {debug_path.name} ({len(html)} tecken)")
 
         # Om parsern inte hittade några matcher: spara HTML:en så vi kan
         # se vad servern faktiskt svarade med. Då blir det enkelt att
@@ -648,6 +653,11 @@ def parse_args():
         type=int,
         help="Hämta max N matcher per säsong (för test). Om utelämnad: alla.",
     )
+    p.add_argument(
+        "--save-schedule",
+        action="store_true",
+        help="Spara schemasidans HTML till debug_schedule_{year}.html för inspektion.",
+    )
     return p.parse_args()
 
 
@@ -661,7 +671,7 @@ def main():
             sys.exit(1)
         seasons = [(args.season, SEASONS[args.season])]
 
-    run(seasons, limit_per_season=args.limit)
+    run(seasons, limit_per_season=args.limit, save_schedule=args.save_schedule)
 
 
 if __name__ == "__main__":
