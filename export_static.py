@@ -203,7 +203,7 @@ def main():
     matches = []
     for r in conn.execute("""
         SELECT match_id, season_year, match_date, parsed_date, home_team, away_team,
-               home_score, away_score, status
+               home_score, away_score, status, phase
         FROM matches
         ORDER BY match_id
     """):
@@ -217,6 +217,7 @@ def main():
             "hs": r["home_score"],
             "as": r["away_score"],
             "status": r["status"] or "",
+            "phase": r["phase"] or "",
         })
 
     # Statistik per spelare/match — som array-av-arrayer för kompakthet

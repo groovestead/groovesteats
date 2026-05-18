@@ -191,6 +191,13 @@ def open_db():
     except sqlite3.OperationalError:
         pass  # kolumnen finns redan
 
+    # Lägg till phase (grundserie/slutspel) på samma sätt.
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN phase TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # kolumnen finns redan
+
     # Fyll i parsed_date för befintliga rader som saknar värdet.
     rows = conn.execute(
         "SELECT match_id, match_date FROM matches WHERE parsed_date IS NULL AND match_date IS NOT NULL"
@@ -240,14 +247,36 @@ VENUE_RE = re.compile(
     r'class="venuename"[^>]*>(?P<venue>[^<]+)</a>',
 )
 
+# Matchar h2–h4-rubriker i schemasidans HTML (t.ex. "Grundserie", "Slutspel").
+HEADING_RE = re.compile(r'<h[2-4][^>]*>(.*?)</h[2-4]>', re.IGNORECASE | re.DOTALL)
+_STRIP_TAGS_RE = re.compile(r'<[^>]+>')
+
+
+def _phase_from_heading(html_content):
+    """Extrahera fas (regular/playoff) ur en HTML-rubriktext."""
+    text = _STRIP_TAGS_RE.sub('', html_content).strip().lower()
+    if re.search(r'slutspel|playoff|semifinal|kvartsfinal|final', text):
+        return 'playoff'
+    if re.search(r'grundserie|regular', text):
+        return 'regular'
+    return None
+
 
 def parse_schedule(html):
     """Plocka ut alla matcher ur schemasidans HTML.
 
-    Returnerar en lista med dicts: {match_id, status, date, venue}.
+    Returnerar en lista med dicts: {match_id, status, date, venue, phase}.
     """
     matches = []
     starts = list(MATCH_WRAP_RE.finditer(html))
+
+    # Bygg en lista med (position, fas) för alla rubriker med känd fas.
+    headings = [
+        (m.start(), _phase_from_heading(m.group(1)))
+        for m in HEADING_RE.finditer(html)
+    ]
+    headings = [(pos, ph) for pos, ph in headings if ph]
+
     for i, m in enumerate(starts):
         block_start = m.start()
         block_end = starts[i + 1].start() if i + 1 < len(starts) else len(html)
@@ -256,11 +285,19 @@ def parse_schedule(html):
         date_m = DATE_RE.search(block)
         venue_m = VENUE_RE.search(block)
 
+        # Senaste rubriken före detta matchblock avgör fas.
+        phase = None
+        for hpos, hphase in reversed(headings):
+            if hpos < block_start:
+                phase = hphase
+                break
+
         matches.append({
             "match_id": int(m.group("mid")),
             "status": m.group("status"),
             "date": date_m.group("date").strip() if date_m else None,
             "venue": venue_m.group("venue").strip() if venue_m else None,
+            "phase": phase,
         })
     return matches
 
@@ -381,8 +418,8 @@ def save_match(conn, match_id, competition_id, season_year, schedule_info, data)
         """INSERT OR REPLACE INTO matches (
               match_id, competition_id, season_year, match_date, parsed_date, venue,
               status, home_team, away_team, home_score, away_score,
-              attendance, raw_json, fetched_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'))""",
+              attendance, raw_json, fetched_at, phase
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime('now'), ?)""",
         (
             match_id,
             competition_id,
@@ -396,6 +433,7 @@ def save_match(conn, match_id, competition_id, season_year, schedule_info, data)
             _int(home.get("score") or home.get("full_score")),
             _int(away.get("score") or away.get("full_score")),
             _int(data.get("attendance")),
+            schedule_info.get("phase"),
         ),
     )
 
@@ -512,6 +550,17 @@ def run(seasons_to_fetch, limit_per_season=None):
             debug_path = Path(__file__).parent / f"debug_schedule_{year}.html"
             debug_path.write_text(html, encoding="utf-8")
             print(f"  ⚠ Hittade inga matcher i schemat. Sparade rådata till {debug_path.name} (storlek: {len(html)} tecken)")
+
+        # Uppdatera fas för alla matcher i schemat (inkl. redan hämtade).
+        phase_updates = [
+            (info["phase"], info["match_id"])
+            for info in schedule if info.get("phase")
+        ]
+        if phase_updates:
+            conn.executemany("UPDATE matches SET phase = ? WHERE match_id = ?", phase_updates)
+            conn.commit()
+            phases = set(p for p, _ in phase_updates)
+            print(f"  Fas: uppdaterade {len(phase_updates)} matcher ({', '.join(sorted(phases))})")
 
         to_fetch = [m for m in completed if m["match_id"] not in already_have]
         if limit_per_season:

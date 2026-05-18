@@ -167,8 +167,11 @@ let COMPARE_KEY = null;   // spelare A i pågående jämförelse
 let recordsTab = 'current'; // 'current' | 'alltime'
 let _pKey = null;             // current player page key
 let _pSeason = null;          // selected season year (null = all seasons)
+let _pPhase = null;           // selected phase: null | 'regular' | 'playoff'
 let _glSort = {col:null, dir:-1}; // game log sort state
-let _pBests = {};             // {field: {val, matchId}} for current career/season bests
+let _pBests = {};             // {field: {val, matchId}} for current filter bests
+let _pCareerBests = {};       // {field: {val, matchId}} always career-wide
+let _pFilteredRows = [];      // current filtered rows (season + phase)
 let _tName = null;            // current team page name
 let _tSeason = null;          // selected season year on team page (null = all)
 
@@ -325,6 +328,35 @@ const TEAM_ABBREV = {
 };
 function abbrevTeam(name) {
   return name ? (TEAM_ABBREV[name] || name.split(' ')[0]) : '';
+}
+
+// Returnerar en stjärna för den givna statkolumnen i spelloggen:
+// röd = karriärbäst, gul = bäst inom nuvarande filter (men inte karriärbäst).
+function starFor(key, r) {
+  let val;
+  if (key === 'reb') val = (get(r,'rebounds_def')||0) + (get(r,'rebounds_off')||0);
+  else if (key === 'gmsc') { const v = gmsc(r); val = v != null ? Math.round(v * 10) / 10 : null; }
+  else val = get(r, key);
+  if (val == null || val <= 0) return '';
+  const cb = _pCareerBests[key], sb = _pBests[key];
+  if (cb && val >= cb.val)
+    return '<span style="color:#ff6b6b;font-size:9px;vertical-align:super;line-height:0" title="Karriärbäst">★</span>';
+  if (sb && val >= sb.val)
+    return '<span style="color:#ffd700;font-size:9px;vertical-align:super;line-height:0" title="Säsongsbäst">★</span>';
+  return '';
+}
+
+// Returnerar spelarens rader filtrerade på nuvarande säsong + fas.
+function _filteredPlayerRows() {
+  const allRows = STATS_BY_PLAYER[_pKey] || [];
+  if (!_pSeason && !_pPhase) return allRows;
+  return allRows.filter(r => {
+    const m = MATCHES_BY_ID[get(r, 'match_id')];
+    if (!m) return false;
+    if (_pSeason && m.year !== _pSeason) return false;
+    if (_pPhase && m.phase !== _pPhase) return false;
+    return true;
+  });
 }
 
 function fmtSeason(year) {
@@ -666,6 +698,9 @@ function computeBests(rows) {
     {key:'steals',    label:'STL', fn: r => get(r,'steals')},
     {key:'blocks',    label:'BLK', fn: r => get(r,'blocks')},
     {key:'three_made',label:'3PT', fn: r => get(r,'three_made')},
+    // Spårade men ej visade i bests-boxen (används för stjärnmarkeringar i spelloggen)
+    {key:'plus_minus',label:'+/-', fn: r => get(r,'plus_minus')},
+    {key:'gmsc',      label:'GmSc',fn: r => { const v = gmsc(r); return v != null ? Math.round(v * 10) / 10 : null; }},
   ];
   const bests = {};
   for (const cat of BEST_CATS) {
@@ -681,8 +716,9 @@ function computeBests(rows) {
   return bests;
 }
 
+const _BESTS_BOX_KEYS = ['points','reb','assists','steals','blocks','three_made'];
 function renderBestsBox(bests, label) {
-  const cells = Object.values(bests);
+  const cells = _BESTS_BOX_KEYS.map(k => bests[k]).filter(Boolean);
   if (!cells.length) return '';
   const items = cells.map(b => {
     const m = MATCHES_BY_ID[b.matchId];
@@ -705,7 +741,13 @@ function renderBestsBox(bests, label) {
 
 function buildPlayerStats(rows) {
   _pBests = computeBests(rows);
-  const bestsLabel = _pSeason ? `Säsongen ${fmtSeason(_pSeason)} — högsta notering` : 'Karriär — högsta notering';
+  _pCareerBests = computeBests(STATS_BY_PLAYER[_pKey] || []);
+  _pFilteredRows = rows;
+  const hasFilter = _pSeason || _pPhase;
+  const phaseLabel = _pPhase === 'regular' ? 'Grundserie' : _pPhase === 'playoff' ? 'Slutspel' : '';
+  const bestsLabel = hasFilter
+    ? [_pSeason ? `Säsongen ${fmtSeason(_pSeason)}` : '', phaseLabel].filter(Boolean).join(' · ') + ' — högsta notering'
+    : 'Karriär — högsta notering';
   return renderBestsBox(_pBests, bestsLabel)
        + renderRecentVsSeason(rows)
        + renderSeasonsTable(rows)
@@ -722,17 +764,25 @@ function filterPlayerPage(year) {
   });
   const statsDiv = document.getElementById('player-stats');
   if (!statsDiv) return;
-  const all = STATS_BY_PLAYER[_pKey] || [];
-  const rows = year ? all.filter(r => {
-    const m = MATCHES_BY_ID[get(r,'match_id')];
-    return m && m.year === year;
-  }) : all;
   _glSort = {col:null, dir:-1};
-  statsDiv.innerHTML = buildPlayerStats(rows);
+  statsDiv.innerHTML = buildPlayerStats(_filteredPlayerRows());
+}
+
+function filterPlayerPhase(phase) {
+  _pPhase = phase;
+  document.querySelectorAll('.p-phase-btn').forEach(btn => {
+    const active = btn.dataset.phase === (phase || 'all');
+    btn.style.background = active ? '#1a3a5c' : 'transparent';
+    btn.style.color     = active ? '#e8edf4'  : '#9aa3b2';
+  });
+  const statsDiv = document.getElementById('player-stats');
+  if (!statsDiv) return;
+  _glSort = {col:null, dir:-1};
+  statsDiv.innerHTML = buildPlayerStats(_filteredPlayerRows());
 }
 
 function renderPlayerPage(key) {
-  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; }
+  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; _pPhase = null; }
   _pKey = key;
   const player = PLAYERS_BY_KEY[key];
   if (!player) {
@@ -819,12 +869,21 @@ function renderPlayerPage(key) {
       ${seasonBtns}
     </div>`;
 
+  // Fasfilterknappar (grundserie/slutspel) — visas bara om fas-data finns
+  const hasPhase = allRows.some(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.phase; });
+  if (hasPhase) {
+    const pBtn = (ph, label) =>
+      `<button class="p-phase-btn" data-phase="${ph||'all'}" style="${btnStyle(_pPhase===ph)}" onclick="filterPlayerPhase(${ph ? `'${ph}'` : 'null'})">${label}</button>`;
+    html += `
+      <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;flex-wrap:wrap;margin:4px 0 4px">
+        ${pBtn(null, 'Alla')}
+        ${pBtn('regular', 'Grundserie')}
+        ${pBtn('playoff', 'Slutspel')}
+      </div>`;
+  }
+
   // Stats (filter-uppdaterbara)
-  const filteredRows = _pSeason ? allRows.filter(r => {
-    const m = MATCHES_BY_ID[get(r,'match_id')];
-    return m && m.year === _pSeason;
-  }) : allRows;
-  html += `<div id="player-stats">${buildPlayerStats(filteredRows)}</div>`;
+  html += `<div id="player-stats">${buildPlayerStats(_filteredPlayerRows())}</div>`;
 
   $main.innerHTML = html;
   window.scrollTo(0, 0);
@@ -1746,7 +1805,7 @@ function glSort(col) {
   _glSort.dir = _glSort.col === col ? -_glSort.dir : -1;
   _glSort.col = col;
   const tb = document.getElementById('gl-body');
-  if (tb) tb.innerHTML = buildGlRows(STATS_BY_PLAYER[_pKey] || []);
+  if (tb) tb.innerHTML = buildGlRows(_pFilteredRows);
 }
 
 function buildGlRows(allRows) {
@@ -1791,29 +1850,24 @@ function buildGlRows(allRows) {
     const techFoul = pf ? (pf[1] + pf[2]) : 0;
     const ofCell = offFoul ? `<td style="color:#ff8b8b">${offFoul}</td>` : '<td class="muted">0</td>';
     const tfCell = techFoul ? `<td style="color:#ff8b8b">${techFoul}</td>` : '<td class="muted">0</td>';
-    // Markera rad som innehåller karriärbäst/säsongsbäst
-    const isBest = Object.values(_pBests).some(b => b.matchId === mid);
-    const rowStyle = isBest ? ' style="background:#1a1600"' : '';
-    const starCell = isBest ? '<td style="color:#ffd700;width:16px" title="Karriärbäst">★</td>' : '<td style="width:16px"></td>';
     return `
-      <tr class="match"${rowStyle}>
-        ${starCell}
+      <tr class="match">
         <td><a href="#/match/${mid}" style="color:inherit">${escapeHtml((m.date_parsed || m.date || '').slice(0, 10))}</a></td>
         <td class="muted">${result}</td>
         <td>${escapeHtml(get(r,'minutes') || '')}</td>
-        <td>${fmtInt(get(r,'points'))}</td>
-        <td>${fmtInt(reb)}</td>
-        <td>${fmtInt(get(r,'assists'))}</td>
-        <td>${fmtInt(get(r,'steals'))}</td>
-        <td>${fmtInt(get(r,'blocks'))}</td>
+        <td>${starFor('points',r)}${fmtInt(get(r,'points'))}</td>
+        <td>${starFor('reb',r)}${fmtInt(reb)}</td>
+        <td>${starFor('assists',r)}${fmtInt(get(r,'assists'))}</td>
+        <td>${starFor('steals',r)}${fmtInt(get(r,'steals'))}</td>
+        <td>${starFor('blocks',r)}${fmtInt(get(r,'blocks'))}</td>
         <td>${fmtInt(get(r,'turnovers'))}</td>
         ${ofCell}
         ${tfCell}
         <td>${fmtInt(get(r,'fg_made'))}/${fmtInt(get(r,'fg_att'))}</td>
-        <td>${fmtInt(get(r,'three_made'))}/${fmtInt(get(r,'three_att'))}</td>
+        <td>${starFor('three_made',r)}${fmtInt(get(r,'three_made'))}/${fmtInt(get(r,'three_att'))}</td>
         <td>${fmtInt(get(r,'ft_made'))}/${fmtInt(get(r,'ft_att'))}</td>
-        <td>${fmtInt(get(r,'plus_minus'))}</td>
-        <td style="color:#a0c4ff">${fmt(gmsc(r))}</td>
+        <td>${starFor('plus_minus',r)}${fmtInt(get(r,'plus_minus'))}</td>
+        <td style="color:#a0c4ff">${starFor('gmsc',r)}${fmt(gmsc(r))}</td>
       </tr>`;
   }).join('');
 }
@@ -1826,7 +1880,6 @@ function renderGameLog(allRows) {
       <div class="card scroll-x">
         <table>
           <thead><tr>
-            <th style="width:16px"></th>
             ${_glTh('date','Datum')}
             <th style="text-align:left">Match</th>
             <th>Min</th>
