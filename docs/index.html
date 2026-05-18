@@ -190,7 +190,11 @@ async function load() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     DATA = await r.json();
   } catch (e) {
-    $main.innerHTML = '<div class="empty"><p>Kunde inte ladda data: ' + escapeHtml(e.message) + '</p></div>';
+    $main.innerHTML = `<div class="empty">
+      <p>Kunde inte ladda statistikdata.</p>
+      <p style="font-size:13px;color:#9aa3b2">Fel: ${escapeHtml(e.message)}</p>
+      <p style="font-size:13px;color:#9aa3b2">Prova att ladda om sidan. Om felet kvarstår kan det bero på att datat håller på att uppdateras — försök igen om några minuter.</p>
+    </div>`;
     return;
   }
 

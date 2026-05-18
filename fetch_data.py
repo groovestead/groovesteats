@@ -544,8 +544,14 @@ def run(seasons_to_fetch, limit_per_season=None):
         print(f"\n=== Säsong {year} (competition_id {cid}) ===")
         try:
             html = http_get(SCHEDULE_URL.format(cid=cid))
+        except urllib.error.HTTPError as e:
+            print(f"  Kunde inte hämta schema för {year}: servern svarade {e.code} {e.reason}")
+            continue
+        except urllib.error.URLError as e:
+            print(f"  Kunde inte hämta schema för {year}: nätverksfel — {e.reason}")
+            continue
         except Exception as e:
-            print(f"  Kunde inte hämta schema för {year}: {e}")
+            print(f"  Kunde inte hämta schema för {year}: oväntat fel — {e}")
             continue
 
         schedule = parse_schedule(html)
@@ -585,10 +591,17 @@ def run(seasons_to_fetch, limit_per_season=None):
                 total_new += 1
                 print(f"  [{i}/{len(to_fetch)}] match {mid} — {info.get('date','?')} ✓")
             except urllib.error.HTTPError as e:
-                print(f"  [{i}/{len(to_fetch)}] match {mid} — HTTP-fel {e.code}")
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — HTTP {e.code} {e.reason}")
+                total_failed += 1
+            except urllib.error.URLError as e:
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — nätverksfel: {e.reason}")
+                total_failed += 1
+            except json.JSONDecodeError as e:
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — ogiltig JSON: {e}")
                 total_failed += 1
             except Exception as e:
-                print(f"  [{i}/{len(to_fetch)}] match {mid} — fel: {e}")
+                print(f"  [{i}/{len(to_fetch)}] match {mid} — oväntat fel: {e}")
+                total_failed += 1
                 total_failed += 1
 
             time.sleep(DELAY_BETWEEN_MATCHES)

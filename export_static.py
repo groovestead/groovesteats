@@ -178,10 +178,14 @@ STAT_FIELDS = [
 
 def main():
     if not DB_PATH.exists():
-        raise SystemExit(f"Hittar inte databasen: {DB_PATH}")
+        raise SystemExit(f"Hittar inte databasen: {DB_PATH}\nKör fetch_data.py först.")
 
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+
+    match_count = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
+    if match_count == 0:
+        print("Varning: databasen innehåller inga matcher. Kör fetch_data.py för att hämta data.")
 
     # Spelare
     players = []
