@@ -359,6 +359,89 @@ def compute_and_write_lineups(conn, pbp_dir, out_dir):
     print(f"  Lineups: bearbetade {count} matcher, skrev {files_written} lagfiler i docs/lineups/")
 
 
+def compute_team_stats(conn):
+    """Per-season per-match team averages for league ranking and team comparison."""
+    rows = conn.execute("""
+        SELECT
+            m.season_year,
+            p.team_name,
+            COUNT(DISTINCT p.match_id)                AS games,
+            SUM(COALESCE(p.points, 0))                AS pts,
+            SUM(COALESCE(p.rebounds_def, 0))          AS reb_def,
+            SUM(COALESCE(p.rebounds_off, 0))          AS reb_off,
+            SUM(COALESCE(p.rebounds_total, 0))        AS reb_tot,
+            SUM(COALESCE(p.assists, 0))               AS ast,
+            SUM(COALESCE(p.steals, 0))                AS stl,
+            SUM(COALESCE(p.blocks, 0))                AS blk,
+            SUM(COALESCE(p.turnovers, 0))             AS tov,
+            SUM(COALESCE(p.fg_made, 0))               AS fg_made,
+            SUM(COALESCE(p.fg_att, 0))                AS fg_att,
+            SUM(COALESCE(p.two_made, 0))              AS two_made,
+            SUM(COALESCE(p.two_att, 0))               AS two_att,
+            SUM(COALESCE(p.three_made, 0))            AS three_made,
+            SUM(COALESCE(p.three_att, 0))             AS three_att,
+            SUM(COALESCE(p.points_fast_break, 0))     AS fbp,
+            SUM(COALESCE(p.points_in_paint, 0))       AS pip
+        FROM player_match_stats p
+        JOIN matches m ON m.match_id = p.match_id
+        WHERE m.status = 'COMPLETE'
+        GROUP BY m.season_year, p.team_name
+    """).fetchall()
+
+    result = {}
+    for row in rows:
+        yr = str(row[0])
+        team = canonical_team(row[1])
+        games = row[2]
+        if not games:
+            continue
+
+        pts      = row[3]  / games
+        reb_def  = row[4]  / games
+        reb_off  = row[5]  / games
+        reb_tot  = row[6]  / games
+        ast      = row[7]  / games
+        stl      = row[8]  / games
+        blk      = row[9]  / games
+        tov      = row[10] / games
+        fg_made, fg_att     = row[11], row[12]
+        two_made, two_att   = row[13], row[14]
+        three_made, three_att = row[15], row[16]
+        fbp = row[17] / games
+        pip = row[18] / games
+
+        fg_pct    = round(fg_made    / fg_att    * 100, 1) if fg_att    else None
+        two_pct   = round(two_made   / two_att   * 100, 1) if two_att   else None
+        three_pct = round(three_made / three_att * 100, 1) if three_att else None
+
+        if yr not in result:
+            result[yr] = {}
+        # If two raw names canonicalize to the same team within a season, keep the one
+        # with more games (edge-case handling — should not normally occur).
+        existing = result[yr].get(team)
+        if existing and existing["g"] >= games:
+            continue
+
+        result[yr][team] = {
+            "g": games,
+            "pts":       round(pts,     2),
+            "reb_def":   round(reb_def, 2),
+            "reb_off":   round(reb_off, 2),
+            "reb_tot":   round(reb_tot, 2),
+            "ast":       round(ast,     2),
+            "stl":       round(stl,     2),
+            "blk":       round(blk,     2),
+            "tov":       round(tov,     2),
+            "fg_pct":    fg_pct,
+            "two_pct":   two_pct,
+            "three_pct": three_pct,
+            "pip":       round(pip,     2),
+            "fbp":       round(fbp,     2),
+        }
+
+    return result
+
+
 def main():
     if not DB_PATH.exists():
         raise SystemExit(f"Hittar inte databasen: {DB_PATH}\nKör fetch_data.py först.")
@@ -461,6 +544,9 @@ def main():
 
     compute_and_write_lineups(conn, pbp_dir, OUT_DIR)
 
+    team_stats = compute_team_stats(conn)
+    print(f"  Lagstatistik: {sum(len(v) for v in team_stats.values())} lag/säsong-kombinationer")
+
     finals = [
         {"year": yr, "champion": ch, "finalist": fn, "aborted": ab}
         for yr, ch, fn, ab in _FINALS_HISTORY
@@ -488,6 +574,7 @@ def main():
         "stats": stats,
         "pbp_fouls": pbp_fouls,
         "finals": finals,
+        "team_stats": team_stats,
     }
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

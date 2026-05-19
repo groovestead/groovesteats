@@ -202,6 +202,7 @@ let PLAYERS_BY_KEY = {};  // {player_key: playerObj}
 let FIELD_INDEX = {};     // {fieldName: index in stat row}
 let PBP_FOULS = {};       // {"player_key:match_id": [off, tech, unsport]}
 let TEAMS_DATA = {};      // {teamName: {name, seasons:[{year,wins,losses,ptsFor,ptsAgainst,games}]}}
+let TEAM_STATS = {};      // {seasonYear: {teamName: {g,pts,reb_tot,...}}}
 let FINALS = [];          // [{year, champion, finalist, aborted}]
 let lastSearch = '';      // bevaras vid navigering tillbaka från spelare/lag-sida
 let COMPARE_KEY = null;   // spelare A i pågående jämförelse
@@ -223,6 +224,9 @@ let _pFilteredRows = [];      // current filtered rows (season + phase)
 let _tName = null;            // current team page name
 let _tSeason = null;          // selected season year on team page (null = all)
 let _tLineups = {};           // cache: {teamName: {year: [...]}} loaded from lineups JSON
+let _tcmpTeam1 = null;        // team A on compare-team page
+let _tcmpTeam2 = null;        // team B on compare-team page
+let _tcmpSeason = null;       // selected season on compare-team page
 
 const $main = document.getElementById('main');
 const $search = document.getElementById('search');
@@ -268,6 +272,7 @@ async function load() {
 
   // Bygg lagindex från matcher
   FINALS = DATA.finals || [];
+  TEAM_STATS = DATA.team_stats || {};
   const _teamSeasons = {};
   for (const m of DATA.matches) {
     if (m.hs == null || m.as == null) continue;
@@ -366,6 +371,32 @@ function avgPer30(rows, field) {
 
 function fullName(p) {
   return ((p.first || '') + ' ' + (p.last || '')).trim();
+}
+
+// Returns {teamName: {cat: {rank, total}}} for all teams in a given season year.
+// tov is lower-is-better; all other categories higher-is-better.
+function computeTeamRankings(year) {
+  const seasonKey = String(year);
+  const teamsInYear = TEAM_STATS[seasonKey];
+  if (!teamsInYear) return {};
+  const cats = ['pts','reb_tot','reb_off','reb_def','ast','stl','blk','tov','fg_pct','two_pct','three_pct','pip','fbp'];
+  const rankings = {};
+  for (const cat of cats) {
+    const teams = Object.keys(teamsInYear).filter(t => teamsInYear[t][cat] != null);
+    const lowerBetter = cat === 'tov';
+    teams.sort((a, b) => lowerBetter
+      ? teamsInYear[a][cat] - teamsInYear[b][cat]
+      : teamsInYear[b][cat] - teamsInYear[a][cat]);
+    teams.forEach((team, idx) => {
+      if (!rankings[team]) rankings[team] = {};
+      rankings[team][cat] = {rank: idx + 1, total: teams.length};
+    });
+  }
+  return rankings;
+}
+
+function navigateToTeamCompare(t1, t2) {
+  location.hash = '#/compare-team/' + encodeURIComponent(t1) + '/' + encodeURIComponent(t2);
 }
 
 // Avancerade effektivitetsmått (per match)
@@ -517,6 +548,13 @@ function route() {
     if (slash > 0) {
       renderComparePage(decodeURIComponent(rest.substring(0, slash)),
                         decodeURIComponent(rest.substring(slash + 1)));
+    }
+  } else if (hash.startsWith('#/compare-team/')) {
+    const rest = hash.substring('#/compare-team/'.length);
+    const slash = rest.indexOf('/');
+    if (slash > 0) {
+      renderTeamComparePage(decodeURIComponent(rest.substring(0, slash)),
+                            decodeURIComponent(rest.substring(slash + 1)));
     }
   } else {
     renderSearchPage($search.value);
@@ -2017,7 +2055,9 @@ function filterTeamPage(year) {
   document.querySelectorAll('#season-record-body tr').forEach(tr => {
     tr.style.background = (year && tr.dataset.year === String(year)) ? '#0d1f35' : '';
   });
-  // Uppdatera ledaravsnittet
+  // Uppdatera rankings- och ledaravsnittet
+  const rankDiv = document.getElementById('team-rankings');
+  if (rankDiv) rankDiv.innerHTML = renderTeamRankings(_tName, _tSeason);
   const div = document.getElementById('team-leaders');
   if (div) div.innerHTML = renderTeamSeasonLeaders(_tName, _tSeason);
   // Uppdatera femmannavsnittet om data redan är cachad
@@ -2025,6 +2065,64 @@ function filterTeamPage(year) {
   if (el && _tLineups[_tName]) {
     el.innerHTML = renderLineupsSection(_tName, _tLineups[_tName]);
   }
+}
+
+const _TEAM_RANK_CATS = [
+  {key:'pts',       label:'Poäng/match'},
+  {key:'reb_tot',   label:'Returer/match'},
+  {key:'reb_off',   label:'Off. returer/match'},
+  {key:'reb_def',   label:'Def. returer/match'},
+  {key:'ast',       label:'Assists/match'},
+  {key:'stl',       label:'Steals/match'},
+  {key:'blk',       label:'Blocks/match'},
+  {key:'tov',       label:'Turnovers/match',  lowerBetter:true},
+  {key:'fg_pct',    label:'FG%',              pct:true},
+  {key:'two_pct',   label:'2P%',              pct:true},
+  {key:'three_pct', label:'3P%',              pct:true},
+  {key:'pip',       label:'PIP/match'},
+  {key:'fbp',       label:'FBP/match'},
+];
+
+function renderTeamRankings(teamName, year) {
+  if (!year) return '';
+  const seasonKey = String(year);
+  const seasonData = TEAM_STATS[seasonKey];
+  if (!seasonData || !seasonData[teamName]) return '';
+
+  const rankings = computeTeamRankings(year);
+  const teamRanks = rankings[teamName] || {};
+  const teamData = seasonData[teamName];
+  const nTeams = Object.keys(seasonData).length;
+
+  const rows = _TEAM_RANK_CATS.map(cat => {
+    const val = teamData[cat.key];
+    if (val == null) return '';
+    const r = teamRanks[cat.key];
+    const rank = r ? r.rank : null;
+    const total = r ? r.total : nTeams;
+    const isGood = rank && rank <= Math.ceil(total / 3);
+    const isMid  = rank && rank <= Math.ceil(total * 2 / 3);
+    const rankColor = isGood ? '#6fd28e' : isMid ? '#e8edf4' : '#ff8b8b';
+    const rankStr = rank ? `<span style="color:${rankColor};font-weight:600">#${rank}</span><span class="muted"> av ${total}</span>` : '–';
+    const valStr = cat.pct ? `${val.toFixed(1)}%` : val.toFixed(1);
+    return `<tr class="match">
+      <td>${cat.label}</td>
+      <td style="font-variant-numeric:tabular-nums">${valStr}</td>
+      <td>${rankStr}</td>
+    </tr>`;
+  }).join('');
+
+  if (!rows) return '';
+  return `
+    <div class="section">
+      <h2>Ligaranking — ${fmtSeason(year)}</h2>
+      <div class="card scroll-x">
+        <table>
+          <thead><tr><th>Kategori</th><th>Värde</th><th>Placering</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function renderTeamPage(teamName) {
@@ -2116,11 +2214,24 @@ function renderTeamPage(teamName) {
     `<button class="t-season-btn" data-year="${y}" style="${btnStyle(_tSeason===y)}" onclick="filterTeamPage(${y})">${fmtSeason(y)}</button>`
   ).join('');
 
+  // Compare-team button
+  const otherTeams = Object.keys(TEAMS_DATA).filter(t => t !== teamName).sort();
+  const compareTeamHtml = otherTeams.length ? `
+    <div style="margin:20px 0 0">
+      <label style="font-size:13px;color:#9aa3b2;margin-right:8px">Jämför med:</label>
+      <select onchange="if(this.value)navigateToTeamCompare(${JSON.stringify(teamName)},this.value)" style="background:#1a2235;color:#e8edf4;border:1px solid #2a2f3a;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
+        <option value="">Välj lag…</option>
+        ${otherTeams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
+      </select>
+    </div>` : '';
+
   html += `
     <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;flex-wrap:wrap;margin:20px 0 4px">
       <button class="t-season-btn" data-year="all" style="${btnStyle(_tSeason===null)}" onclick="filterTeamPage(null)">Alla säsonger</button>
       ${seasonBtns}
     </div>
+    <div id="team-rankings">${renderTeamRankings(teamName, _tSeason)}</div>
+    ${compareTeamHtml}
     <div id="team-leaders">${renderTeamSeasonLeaders(teamName, _tSeason)}</div>
     <div id="team-lineups"></div>`;
 
@@ -2315,13 +2426,195 @@ function renderGameLog(allRows) {
 }
 
 // =============================================================================
+// Lagjämförelse
+// =============================================================================
+
+function filterTeamComparePage(season) {
+  _tcmpSeason = season;
+  renderTeamComparePage(_tcmpTeam1, _tcmpTeam2);
+}
+
+function renderTeamComparePage(team1, team2) {
+  if (!TEAMS_DATA[team1] || !TEAMS_DATA[team2]) {
+    $main.innerHTML = `<div class="empty"><p>Kunde inte hitta ett eller båda lagen.</p><p>${backLink()}</p></div>`;
+    return;
+  }
+  if (team1 !== _tcmpTeam1 || team2 !== _tcmpTeam2) {
+    _tcmpSeason = null;
+  }
+  _tcmpTeam1 = team1;
+  _tcmpTeam2 = team2;
+
+  // Seasons where both teams have data in TEAM_STATS
+  const yrs1 = new Set(Object.keys(TEAM_STATS).filter(yr => TEAM_STATS[yr][team1]).map(Number));
+  const yrs2 = new Set(Object.keys(TEAM_STATS).filter(yr => TEAM_STATS[yr][team2]).map(Number));
+  const sharedYears = [...yrs1].filter(y => yrs2.has(y)).sort((a, b) => b - a);
+
+  // Default to most recent shared year if none selected
+  if (_tcmpSeason === null && sharedYears.length) _tcmpSeason = sharedYears[0];
+
+  const btnStyle = active =>
+    `cursor:pointer;padding:5px 12px;border-radius:14px;font-size:13px;font-weight:600;border:none;` +
+    (active ? 'background:#1a3a5c;color:#e8edf4;' : 'background:transparent;color:#9aa3b2;');
+
+  const seasonBtns = sharedYears.map(y =>
+    `<button style="${btnStyle(_tcmpSeason===y)}" onclick="filterTeamComparePage(${y})">${fmtSeason(y)}</button>`
+  ).join('');
+
+  const filterHtml = sharedYears.length > 1 ? `
+    <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;flex-wrap:wrap;margin:0 0 16px">
+      ${seasonBtns}
+    </div>` : '';
+
+  // Team cards
+  function teamCard(name, side) {
+    const color = side === 'a' ? '#6cb6ff' : '#ff9966';
+    const td = TEAMS_DATA[name];
+    const games = _tcmpSeason && td ? (td.seasons.find(s => s.year === _tcmpSeason) || {}).games || '' : '';
+    return `
+      <div class="card" style="border-color:${color}40">
+        <div style="display:flex;gap:12px;align-items:center">
+          <div style="font-size:40px;line-height:1">🏀</div>
+          <div>
+            <div style="font-weight:700;font-size:18px"><a href="#/team/${encodeURIComponent(name)}">${escapeHtml(name)}</a></div>
+            ${games ? `<div class="muted" style="font-size:13px;margin-top:2px">${games} matcher</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  let html = `
+    <div style="margin-bottom:10px">${backLink()}</div>
+    <div class="cmp-player-grid" style="margin-bottom:12px">
+      ${teamCard(team1, 'a')}
+      ${teamCard(team2, 'b')}
+    </div>
+    ${filterHtml}`;
+
+  if (!_tcmpSeason || !TEAM_STATS[String(_tcmpSeason)]) {
+    html += `<div class="empty"><p>Ingen säsongsdata att jämföra.</p></div>`;
+    $main.innerHTML = html;
+    window.scrollTo(0, 0);
+    return;
+  }
+
+  const seasonStr = String(_tcmpSeason);
+  const d1 = (TEAM_STATS[seasonStr] || {})[team1];
+  const d2 = (TEAM_STATS[seasonStr] || {})[team2];
+
+  if (!d1 || !d2) {
+    html += `<div class="empty"><p>Båda lagen spelade inte i ${fmtSeason(_tcmpSeason)}.</p></div>`;
+    $main.innerHTML = html;
+    window.scrollTo(0, 0);
+    return;
+  }
+
+  const rankings = computeTeamRankings(_tcmpSeason);
+  const r1 = rankings[team1] || {}, r2 = rankings[team2] || {};
+
+  function rankBadge(rankObj) {
+    if (!rankObj) return '';
+    const isGood = rankObj.rank <= Math.ceil(rankObj.total / 3);
+    const isMid  = rankObj.rank <= Math.ceil(rankObj.total * 2 / 3);
+    const c = isGood ? '#6fd28e' : isMid ? '#9aa3b2' : '#ff8b8b';
+    return ` <span style="font-size:11px;color:${c}">#${rankObj.rank}</span>`;
+  }
+
+  const statRows = _TEAM_RANK_CATS.map(cat => {
+    const va = d1[cat.key], vb = d2[cat.key];
+    if (va == null && vb == null) return '';
+    const lowerBetter = !!cat.lowerBetter;
+    const winA = va != null && (vb == null || (lowerBetter ? va < vb : va > vb));
+    const winB = vb != null && (va == null || (lowerBetter ? vb < va : vb > va));
+    const fmtVal = (v, isPct) => v != null ? (isPct ? v.toFixed(1) + '%' : v.toFixed(1)) : '–';
+    const sA = fmtVal(va, cat.pct), sB = fmtVal(vb, cat.pct);
+    const ra = r1[cat.key], rb = r2[cat.key];
+    return `
+      <tr>
+        <td style="font-weight:${winA?700:400};color:${winA?'#6cb6ff':'inherit'}">${sA}${rankBadge(ra)}</td>
+        ${cmpBar(lowerBetter ? (va!=null?-va:null) : va, lowerBetter ? (vb!=null?-vb:null) : vb, 'a')}
+        <td style="text-align:center;color:#9aa3b2;font-size:12px;white-space:nowrap">${cat.label}</td>
+        ${cmpBar(lowerBetter ? (va!=null?-va:null) : va, lowerBetter ? (vb!=null?-vb:null) : vb, 'b')}
+        <td style="font-weight:${winB?700:400};color:${winB?'#ff9966':'inherit'}">${sB}${rankBadge(rb)}</td>
+      </tr>`;
+  }).join('');
+
+  html += `
+    <div class="section">
+      <h2>Jämförelse — ${fmtSeason(_tcmpSeason)}</h2>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:13px">
+          <span style="color:#6cb6ff;font-weight:600">${escapeHtml(team1)}</span>
+          <span style="color:#ff9966;font-weight:600">${escapeHtml(team2)}</span>
+        </div>
+        <div class="scroll-x">
+          <table style="width:100%">
+            <tbody>${statRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  // Season-by-season table (when multiple seasons exist)
+  const allYears = [...new Set([...Object.keys(TEAM_STATS)])].map(Number)
+    .filter(y => TEAM_STATS[String(y)][team1] || TEAM_STATS[String(y)][team2])
+    .sort((a, b) => b - a);
+
+  if (allYears.length > 1) {
+    const seasonTableRows = allYears.map(y => {
+      const ys = String(y);
+      const e1 = (TEAM_STATS[ys] || {})[team1], e2 = (TEAM_STATS[ys] || {})[team2];
+      const fmt1 = (v) => v != null ? v.toFixed(1) : '–';
+      return `<tr class="match">
+        <td>${fmtSeason(y)}</td>
+        <td style="color:#6cb6ff">${fmt1(e1 && e1.pts)}</td>
+        <td style="color:#6cb6ff">${fmt1(e1 && e1.reb_tot)}</td>
+        <td style="color:#6cb6ff">${fmt1(e1 && e1.ast)}</td>
+        <td class="muted" style="font-size:12px">${e1 ? e1.g : '–'}</td>
+        <td class="muted" style="border-left:1px solid #2a2f3a"></td>
+        <td class="muted" style="font-size:12px">${e2 ? e2.g : '–'}</td>
+        <td style="color:#ff9966">${fmt1(e2 && e2.pts)}</td>
+        <td style="color:#ff9966">${fmt1(e2 && e2.reb_tot)}</td>
+        <td style="color:#ff9966">${fmt1(e2 && e2.ast)}</td>
+      </tr>`;
+    }).join('');
+
+    html += `
+      <div class="section">
+        <h2>Säsong för säsong</h2>
+        <div class="card scroll-x">
+          <table>
+            <thead><tr>
+              <th>Säsong</th>
+              <th colspan="3" style="color:#6cb6ff;text-align:center">${escapeHtml(team1.split(' ')[0])}</th>
+              <th style="font-size:11px">M</th>
+              <th></th>
+              <th style="font-size:11px">M</th>
+              <th colspan="3" style="color:#ff9966;text-align:center">${escapeHtml(team2.split(' ')[0])}</th>
+            </tr>
+            <tr>
+              <th></th>
+              <th>PTS</th><th>REB</th><th>AST</th><th></th><th></th><th></th>
+              <th>PTS</th><th>REB</th><th>AST</th>
+            </tr></thead>
+            <tbody>${seasonTableRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  $main.innerHTML = html;
+  window.scrollTo(0, 0);
+}
+
+// =============================================================================
 // Sökrutans event
 // =============================================================================
 
 let searchTimer = null;
 $search.addEventListener('input', () => {
   // Om vi är på en spelare-, lag- eller jämförelsesida, gå tillbaka till sök vid första bokstaven
-  const onSubpage = location.hash.startsWith('#/player/') || location.hash.startsWith('#/team/') || location.hash.startsWith('#/compare/') || location.hash.startsWith('#/match/');
+  const onSubpage = location.hash.startsWith('#/player/') || location.hash.startsWith('#/team/') || location.hash.startsWith('#/compare/') || location.hash.startsWith('#/compare-team/') || location.hash.startsWith('#/match/');
   if (onSubpage && $search.value.trim()) {
     lastSearch = '';
     location.hash = '';
