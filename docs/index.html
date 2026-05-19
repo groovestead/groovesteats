@@ -127,6 +127,16 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   .player-name { font-size: 22px; }
   th, td { padding: 6px 8px; font-size: 13px; }
 }
+.collapsible-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+.collapsible-heading:hover { color: #c8d4e8; }
+.collapsible-chevron {
+  font-size: 11px; color: #9aa3b2; margin-left: 8px; transition: transform .2s;
+}
+.collapsible-chevron.open { transform: rotate(90deg); }
+
 .info-tip {
   display: inline-block;
   cursor: help;
@@ -200,6 +210,7 @@ let _pKey = null;             // current player page key
 let _pSeason = null;          // selected season year (null = all seasons)
 let _pPhase = null;           // selected phase: null | 'regular' | 'playoff'
 let _glSort = {col:null, dir:-1}; // game log sort state
+let _glOpen = false;               // game log expanded state
 let _pBests = {};             // {field: {val, matchId}} for current filter bests
 let _pCareerBests = {};       // {field: {val, matchId}} always career-wide
 let _pFilteredRows = [];      // current filtered rows (season + phase)
@@ -846,6 +857,16 @@ function renderSearchPage(query) {
 // Render: spelarsida
 // =============================================================================
 
+function toggleSection(bodyId) {
+  const body = document.getElementById(bodyId);
+  const chevron = document.getElementById(bodyId.replace('body', 'chevron'));
+  if (!body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  if (chevron) chevron.classList.toggle('open', open);
+  if (bodyId === 'game-log-body') _glOpen = open;
+}
+
 function backLink() {
   const href = lastSearch ? '#' : '#';
   const label = lastSearch ? `← Tillbaka till "${escapeHtml(lastSearch)}"` : '← Tillbaka';
@@ -944,7 +965,7 @@ function filterPlayerPhase(phase) {
 }
 
 function renderPlayerPage(key) {
-  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; _pPhase = null; }
+  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; _pPhase = null; _glOpen = false; }
   _pKey = key;
   const player = PLAYERS_BY_KEY[key];
   if (!player) {
@@ -2121,27 +2142,31 @@ function renderGameLog(allRows) {
   if (!allRows.length) return '';
   return `
     <div class="section">
-      <h2>Matcher (${allRows.length})</h2>
-      <div class="card scroll-x">
-        <table>
-          <thead><tr>
-            ${_glTh('date','Datum')}
-            <th style="text-align:left">Match</th>
-            <th>Min</th>
-            ${_glTh('points','PTS')}
-            ${_glTh('reb','REB')}
-            ${_glTh('assists','AST')}
-            ${_glTh('steals','STL')}
-            ${_glTh('blocks','BLK')}
-            ${_glTh('turnovers','TOV')}
-            <th title="Offensiva fouls">OF</th>
-            <th title="Tekniska/osportsliga fouls">TF</th>
-            <th>FG</th><th>3P</th><th>FT</th>
-            ${_glTh('plus_minus','+/-')}
-            ${_glTh('gmsc','GmSc','gmsc')}
-          </tr></thead>
-          <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
-        </table>
+      <h2 class="collapsible-heading" onclick="toggleSection('game-log-body')">
+        Matcher (${allRows.length})<span class="collapsible-chevron${_glOpen ? ' open' : ''}" id="game-log-chevron">▶</span>
+      </h2>
+      <div id="game-log-body" style="display:${_glOpen ? '' : 'none'}">
+        <div class="card scroll-x">
+          <table>
+            <thead><tr>
+              ${_glTh('date','Datum')}
+              <th style="text-align:left">Match</th>
+              <th>Min</th>
+              ${_glTh('points','PTS')}
+              ${_glTh('reb','REB')}
+              ${_glTh('assists','AST')}
+              ${_glTh('steals','STL')}
+              ${_glTh('blocks','BLK')}
+              ${_glTh('turnovers','TOV')}
+              <th title="Offensiva fouls">OF</th>
+              <th title="Tekniska/osportsliga fouls">TF</th>
+              <th>FG</th><th>3P</th><th>FT</th>
+              ${_glTh('plus_minus','+/-')}
+              ${_glTh('gmsc','GmSc','gmsc')}
+            </tr></thead>
+            <tbody id="gl-body">${buildGlRows(allRows)}</tbody>
+          </table>
+        </div>
       </div>
     </div>`;
 }
