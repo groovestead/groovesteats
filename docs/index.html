@@ -215,6 +215,8 @@ let _pSeason = null;          // selected season year (null = all seasons)
 let _pPhase = null;           // selected phase: null | 'regular' | 'playoff'
 let _glSort = {col:null, dir:-1}; // game log sort state
 let _glOpen = false;               // game log expanded state
+let _pPer30 = false;               // per-30-min mode on player page
+let _cmpPer30 = false;             // per-30-min mode on compare page
 let _pBests = {};             // {field: {val, matchId}} for current filter bests
 let _pCareerBests = {};       // {field: {val, matchId}} always career-wide
 let _pFilteredRows = [];      // current filtered rows (season + phase)
@@ -337,6 +339,29 @@ function avg(rows, field) {
     if (v != null) { sum += v; n++; }
   }
   return n ? sum / n : null;
+}
+
+function parseMinutes(str) {
+  if (!str) return 0;
+  const parts = String(str).split(':');
+  if (parts.length < 2) return parseFloat(str) || 0;
+  return parseInt(parts[0], 10) + parseInt(parts[1], 10) / 60;
+}
+
+// Per-30-min normalisering: totalstat / totala minuter * 30.
+// Rader med 0 minuter exkluderas.
+function avgPer30(rows, field) {
+  let totalStat = 0, totalMins = 0;
+  for (const r of rows) {
+    const mins = parseMinutes(get(r, 'minutes'));
+    if (!mins) continue;
+    const v = field === 'reb'
+      ? (get(r,'rebounds_def')||0) + (get(r,'rebounds_off')||0)
+      : (get(r, field) || 0);
+    totalStat += v;
+    totalMins += mins;
+  }
+  return totalMins ? totalStat / totalMins * 30 : null;
 }
 
 function fullName(p) {
@@ -957,6 +982,12 @@ function filterPlayerPage(year) {
   statsDiv.innerHTML = buildPlayerStats(_filteredPlayerRows());
 }
 
+function togglePlayerPer30(on) {
+  _pPer30 = on;
+  const statsDiv = document.getElementById('player-stats');
+  if (statsDiv) statsDiv.innerHTML = buildPlayerStats(_pFilteredRows);
+}
+
 function filterPlayerPhase(phase) {
   _pPhase = phase;
   document.querySelectorAll('.p-phase-btn').forEach(btn => {
@@ -971,7 +1002,7 @@ function filterPlayerPhase(phase) {
 }
 
 function renderPlayerPage(key) {
-  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; _pPhase = null; _glOpen = false; }
+  if (key !== _pKey) { _glSort = {col:null, dir:-1}; _pSeason = null; _pPhase = null; _glOpen = false; _pPer30 = false; }
   _pKey = key;
   const player = PLAYERS_BY_KEY[key];
   if (!player) {
@@ -1151,11 +1182,11 @@ function renderSeasonsTable(allRows) {
   const years = Object.keys(bySeason).map(Number).sort((a,b) => b-a);
   if (!years.length) return '';
 
+  const p30 = _pPer30;
   const rows = years.map(y => {
     const rs = bySeason[y];
     const reb = rs.map(r => (get(r,'rebounds_def')||0) + (get(r,'rebounds_off')||0));
     const rebAvg = reb.length ? reb.reduce((a,b)=>a+b,0)/reb.length : null;
-    // Avancerade effektivitetsmått aggregerade över säsongen
     const fgMadeTot = rs.reduce((s,r)=>s+(get(r,'fg_made')||0),0);
     const fgAttTot  = rs.reduce((s,r)=>s+(get(r,'fg_att')||0),0);
     const tpMadeTot = rs.reduce((s,r)=>s+(get(r,'three_made')||0),0);
@@ -1165,38 +1196,51 @@ function renderSeasonsTable(allRows) {
     const tsSeason  = (2*(fgAttTot + 0.44*ftAttTot)) ? ptsTot / (2*(fgAttTot + 0.44*ftAttTot)) : null;
     const gmscVals  = rs.map(r => gmsc(r));
     const gmscSeason = gmscVals.length ? gmscVals.reduce((a,b)=>a+b,0)/gmscVals.length : null;
+    const pts = p30 ? avgPer30(rs,'points')   : avg(rs,'points');
+    const rbn = p30 ? avgPer30(rs,'reb')      : rebAvg;
+    const ast = p30 ? avgPer30(rs,'assists')  : avg(rs,'assists');
+    const stl = p30 ? avgPer30(rs,'steals')   : avg(rs,'steals');
+    const blk = p30 ? avgPer30(rs,'blocks')   : avg(rs,'blocks');
+    const tov = p30 ? avgPer30(rs,'turnovers'): avg(rs,'turnovers');
     return `
       <tr>
         <td>${fmtSeason(y)}</td>
         <td>${rs.length}</td>
-        <td>${fmt(avg(rs,'points'))}</td>
-        <td>${fmt(rebAvg)}</td>
-        <td>${fmt(avg(rs,'assists'))}</td>
-        <td>${fmt(avg(rs,'steals'))}</td>
-        <td>${fmt(avg(rs,'blocks'))}</td>
-        <td>${fmt(avg(rs,'turnovers'))}</td>
+        <td>${fmt(pts)}</td>
+        <td>${fmt(rbn)}</td>
+        <td>${fmt(ast)}</td>
+        <td>${fmt(stl)}</td>
+        <td>${fmt(blk)}</td>
+        <td>${fmt(tov)}</td>
         <td>${fmt(avg(rs,'fg_made'))}/${fmt(avg(rs,'fg_att'))}</td>
         <td>${fmt(avg(rs,'three_made'))}/${fmt(avg(rs,'three_att'))}</td>
         <td>${fmt(avg(rs,'ft_made'))}/${fmt(avg(rs,'ft_att'))}</td>
-        <td>${fmt(avg(rs,'plus_minus'))}</td>
-        <td style="color:#a0c4ff" title="eFG%">${efgSeason != null ? (efgSeason*100).toFixed(1)+'%' : '–'}</td>
-        <td style="color:#a0c4ff" title="True Shooting%">${tsSeason  != null ? (tsSeason *100).toFixed(1)+'%' : '–'}</td>
-        <td style="color:#a0c4ff" title="Game Score">${fmt(gmscSeason)}</td>
+        ${p30 ? '' : `<td>${fmt(avg(rs,'plus_minus'))}</td>`}
+        ${p30 ? '' : `<td style="color:#a0c4ff" title="eFG%">${efgSeason != null ? (efgSeason*100).toFixed(1)+'%' : '–'}</td>`}
+        ${p30 ? '' : `<td style="color:#a0c4ff" title="True Shooting%">${tsSeason != null ? (tsSeason*100).toFixed(1)+'%' : '–'}</td>`}
+        ${p30 ? '' : `<td style="color:#a0c4ff" title="Game Score">${fmt(gmscSeason)}</td>`}
       </tr>`;
   }).join('');
 
+  const btnSt = on => `cursor:pointer;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;border:none;` +
+    (on ? 'background:#1a3a5c;color:#e8edf4;' : 'background:transparent;color:#9aa3b2;');
+
   return `
     <div class="section">
-      <h2>Säsongssnitt</h2>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <h2 style="margin:0">Säsongssnitt</h2>
+        <div style="display:flex;gap:2px;background:#161f2e;border-radius:12px;padding:3px">
+          <button style="${btnSt(!p30)}" onclick="togglePlayerPer30(false)">Snitt/match</button>
+          <button style="${btnSt(p30)}"  onclick="togglePlayerPer30(true)">Per 30 min</button>
+        </div>
+      </div>
       <div class="card scroll-x">
         <table>
           <thead><tr>
             <th>Säsong</th><th>Matcher</th>
             <th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th>
-            <th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
-            <th>eFG%${infoTip('efg')}</th>
-            <th>TS%${infoTip('ts')}</th>
-            <th>GmSc${infoTip('gmsc')}</th>
+            <th>FG</th><th>3P</th><th>FT</th>
+            ${p30 ? '' : `<th>+/-</th><th>eFG%${infoTip('efg')}</th><th>TS%${infoTip('ts')}</th><th>GmSc${infoTip('gmsc')}</th>`}
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1242,7 +1286,7 @@ function renderTeamsTable(teams) {
 // Render: jämförelsesida
 // =============================================================================
 
-function playerCareerAvg(rows) {
+function playerCareerAvg(rows, per30 = false) {
   const reb = rows.map(r => (get(r,'rebounds_def')||0) + (get(r,'rebounds_off')||0));
   const rebAvg = reb.length ? reb.reduce((a,b)=>a+b,0)/reb.length : null;
   const fgMade = rows.reduce((s,r)=>s+(get(r,'fg_made')||0),0);
@@ -1252,9 +1296,12 @@ function playerCareerAvg(rows) {
   const ftMade = rows.reduce((s,r)=>s+(get(r,'ft_made')||0),0);
   const ftAtt  = rows.reduce((s,r)=>s+(get(r,'ft_att')||0),0);
   return {
-    pts: avg(rows,'points'), reb: rebAvg,
-    ast: avg(rows,'assists'), stl: avg(rows,'steals'),
-    blk: avg(rows,'blocks'),  tov: avg(rows,'turnovers'),
+    pts: per30 ? avgPer30(rows,'points')    : avg(rows,'points'),
+    reb: per30 ? avgPer30(rows,'reb')       : rebAvg,
+    ast: per30 ? avgPer30(rows,'assists')   : avg(rows,'assists'),
+    stl: per30 ? avgPer30(rows,'steals')    : avg(rows,'steals'),
+    blk: per30 ? avgPer30(rows,'blocks')    : avg(rows,'blocks'),
+    tov: per30 ? avgPer30(rows,'turnovers') : avg(rows,'turnovers'),
     fg:  fgAtt  ? fgMade/fgAtt*100   : null,
     tp:  tpAtt  ? tpMade/tpAtt*100   : null,
     ft:  ftAtt  ? ftMade/ftAtt*100   : null,
@@ -1301,6 +1348,7 @@ function renderComparePage(key1, key2) {
   if (key1 !== _cmpKey1 || key2 !== _cmpKey2) {
     _cmpSeason = null;
     _cmpPhase = null;
+    _cmpPer30 = false;
   }
   _cmpKey1 = key1;
   _cmpKey2 = key2;
@@ -1315,7 +1363,7 @@ function renderComparePage(key1, key2) {
 
   const rows1 = _cmpFilterRows(allRows1);
   const rows2 = _cmpFilterRows(allRows2);
-  const s1 = playerCareerAvg(rows1), s2 = playerCareerAvg(rows2);
+  const s1 = playerCareerAvg(rows1, _cmpPer30), s2 = playerCareerAvg(rows2, _cmpPer30);
 
   // Filter buttons
   const btnStyle = active =>
@@ -1338,6 +1386,12 @@ function renderComparePage(key1, key2) {
         <button style="${btnStyle(_cmpPhase==='playoff')}" onclick="filterComparePage(_cmpSeason,'playoff')">Slutspel</button>
       </div>`;
   }
+
+  filterHtml += `
+    <div style="display:flex;gap:2px;background:#161f2e;border-radius:12px;padding:3px;width:fit-content;margin:0 0 16px">
+      <button style="${btnStyle(!_cmpPer30)}" onclick="_cmpPer30=false;renderComparePage(_cmpKey1,_cmpKey2)">Snitt/match</button>
+      <button style="${btnStyle(_cmpPer30)}"  onclick="_cmpPer30=true;renderComparePage(_cmpKey1,_cmpKey2)">Per 30 min</button>
+    </div>`;
 
   // Header: två spelarkort sida vid sida
   function playerCard(p, s, key, side) {
@@ -1369,18 +1423,20 @@ function renderComparePage(key1, key2) {
   const filterLabel = [
     _cmpSeason ? `Säsong ${fmtSeason(_cmpSeason)}` : 'Alla säsonger',
     _cmpPhase === 'regular' ? 'Grundserie' : _cmpPhase === 'playoff' ? 'Slutspel' : '',
+    _cmpPer30 ? 'Per 30 min' : '',
   ].filter(Boolean).join(' · ');
 
+  const sfx = _cmpPer30 ? '/30' : '/m';
   const statDefs = [
-    {label:'PTS/m', a:s1.pts,  b:s2.pts,  dec:1},
-    {label:'REB/m', a:s1.reb,  b:s2.reb,  dec:1},
-    {label:'AST/m', a:s1.ast,  b:s2.ast,  dec:1},
-    {label:'STL/m', a:s1.stl,  b:s2.stl,  dec:1},
-    {label:'BLK/m', a:s1.blk,  b:s2.blk,  dec:1},
-    {label:'TOV/m', a:s1.tov,  b:s2.tov,  dec:1},
-    {label:'FG%',   a:s1.fg,   b:s2.fg,   dec:1},
-    {label:'3P%',   a:s1.tp,   b:s2.tp,   dec:1},
-    {label:'FT%',   a:s1.ft,   b:s2.ft,   dec:1},
+    {label:'PTS'+sfx, a:s1.pts,  b:s2.pts,  dec:1},
+    {label:'REB'+sfx, a:s1.reb,  b:s2.reb,  dec:1},
+    {label:'AST'+sfx, a:s1.ast,  b:s2.ast,  dec:1},
+    {label:'STL'+sfx, a:s1.stl,  b:s2.stl,  dec:1},
+    {label:'BLK'+sfx, a:s1.blk,  b:s2.blk,  dec:1},
+    {label:'TOV'+sfx, a:s1.tov,  b:s2.tov,  dec:1},
+    {label:'FG%',     a:s1.fg,   b:s2.fg,   dec:1},
+    {label:'3P%',     a:s1.tp,   b:s2.tp,   dec:1},
+    {label:'FT%',     a:s1.ft,   b:s2.ft,   dec:1},
   ];
 
   const statRows = statDefs.filter(d => d.a != null || d.b != null).map(d => {
