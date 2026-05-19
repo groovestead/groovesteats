@@ -1603,9 +1603,9 @@ function renderAboutPage() {
       <div class="card" style="line-height:1.75;font-size:15px">
         <h2 style="margin-top:0">Om groovestats</h2>
         <p>Välkommen till groovestats. Detta är ett verktyg för att snabbt hitta relevant statistik inom Svensk Basket. Jag byggde den för att jag såg ett behov för mig själv, men du får hemskt gärna nyttja det om du tror att det finns något intressant att hitta. Det kan vara för dig som är journalist, coach, spelare eller helt enkelt en basketentusiast.</p>
-        <p>Om du hämtar statistik härifrån får du hemskt gärna länka till <strong>groovestats.se</strong>, så kanske fler hittar hit framöver.</p>
-        <p>Har du tankar, förslag eller önskemål kring vad som skulle kunna göra verktyget ännu bättre? Skriv ett mail till <a href="mailto:johannes@grufstedt.com">johannes@grufstedt.com</a> så lyssnar jag.</p>
-        <p style="margin-bottom:0">// Johannes Grufstedt</p>
+        <p>Om du hämtar statistik härifrån och publicerar någonstans får du hemskt gärna länka till <strong>groovestats.se</strong>, så kanske fler hittar hit framöver.</p>
+        <p>Har du tankar, förslag eller önskemål kring vad som skulle kunna göra verktyget ännu bättre? <a href="mailto:johannes@grufstedt.com">Skriv ett mail till mig</a> så lyssnar jag.</p>
+        <p style="margin-bottom:0;font-family:'Brush Script MT','Segoe Script',cursive;font-size:26px;color:#c8d4e8">Johannes Grufstedt</p>
       </div>
     </div>`;
   window.scrollTo(0, 0);
@@ -1696,6 +1696,10 @@ function renderRecordsPage() {
   function extractVal(r, cat) {
     if (cat === 'reb') return (get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0);
     if (cat === 'fg3') return get(r,'three_made') || 0;
+    if (cat === 'pts') return get(r,'points')  || 0;
+    if (cat === 'ast') return get(r,'assists')  || 0;
+    if (cat === 'stl') return get(r,'steals')   || 0;
+    if (cat === 'blk') return get(r,'blocks')   || 0;
     return get(r, cat) || 0;
   }
 
