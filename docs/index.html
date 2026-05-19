@@ -128,7 +128,7 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   th, td { padding: 6px 8px; font-size: 13px; }
 }
 .collapsible-heading {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center;
   cursor: pointer; user-select: none;
 }
 .collapsible-heading:hover { color: #c8d4e8; }
@@ -173,6 +173,7 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   <div class="row">
     <h1 style="margin:0;line-height:1"><a id="home-link"><img src="./assets/logo.svg" alt="groovestats" height="40" style="display:block"></a></h1>
     <a href="#/records" style="font-size:14px;white-space:nowrap;color:#9aa3b2" id="records-link">Rekord</a>
+    <a href="#/om" style="font-size:14px;white-space:nowrap;color:#9aa3b2" id="om-link">Om</a>
     <div class="search">
       <input type="text" id="search" placeholder="Sök spelare eller lag…" autocomplete="off" aria-label="Sök spelare eller lag">
     </div>
@@ -204,6 +205,9 @@ let TEAMS_DATA = {};      // {teamName: {name, seasons:[{year,wins,losses,ptsFor
 let FINALS = [];          // [{year, champion, finalist, aborted}]
 let lastSearch = '';      // bevaras vid navigering tillbaka från spelare/lag-sida
 let COMPARE_KEY = null;   // spelare A i pågående jämförelse
+let _cmpKey1 = null, _cmpKey2 = null;
+let _cmpSeason = null;    // selected season on compare page (null = all)
+let _cmpPhase = null;     // selected phase on compare page (null | 'regular' | 'playoff')
 let recordsTab = null; // null = currentYear | number = specific year | 'alltime'
 let _homeHighsYear = 'current'; // 'current' | 'alltime'
 let _pKey = null;             // current player page key
@@ -477,6 +481,8 @@ function route() {
     renderTeamPage(name);
   } else if (hash === '#/records') {
     renderRecordsPage();
+  } else if (hash === '#/om') {
+    renderAboutPage();
   } else if (hash.startsWith('#/match/')) {
     const mid = parseInt(hash.substring('#/match/'.length), 10);
     if (mid) renderMatchPage(mid);
@@ -1270,15 +1276,68 @@ function cmpBar(valA, valB, side) {
     </div></td>`;
 }
 
+function _cmpFilterRows(rows) {
+  return rows.filter(r => {
+    const m = MATCHES_BY_ID[get(r, 'match_id')];
+    if (!m) return false;
+    if (_cmpSeason && m.year !== _cmpSeason) return false;
+    if (_cmpPhase && m.phase !== _cmpPhase) return false;
+    return true;
+  });
+}
+
+function filterComparePage(season, phase) {
+  _cmpSeason = season;
+  _cmpPhase = phase;
+  renderComparePage(_cmpKey1, _cmpKey2);
+}
+
 function renderComparePage(key1, key2) {
   const p1 = PLAYERS_BY_KEY[key1], p2 = PLAYERS_BY_KEY[key2];
   if (!p1 || !p2) {
     $main.innerHTML = `<div class="empty"><p>Kunde inte hitta en eller båda spelarna.</p><p>${backLink()}</p></div>`;
     return;
   }
-  const rows1 = STATS_BY_PLAYER[key1] || [];
-  const rows2 = STATS_BY_PLAYER[key2] || [];
+  if (key1 !== _cmpKey1 || key2 !== _cmpKey2) {
+    _cmpSeason = null;
+    _cmpPhase = null;
+  }
+  _cmpKey1 = key1;
+  _cmpKey2 = key2;
+
+  const allRows1 = STATS_BY_PLAYER[key1] || [];
+  const allRows2 = STATS_BY_PLAYER[key2] || [];
+
+  // Seasons where both players have data (for filter buttons)
+  const yrs1 = new Set(allRows1.map(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.year; }).filter(Boolean));
+  const yrs2 = new Set(allRows2.map(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.year; }).filter(Boolean));
+  const sharedYears = [...yrs1].filter(y => yrs2.has(y)).sort((a,b) => b-a);
+
+  const rows1 = _cmpFilterRows(allRows1);
+  const rows2 = _cmpFilterRows(allRows2);
   const s1 = playerCareerAvg(rows1), s2 = playerCareerAvg(rows2);
+
+  // Filter buttons
+  const btnStyle = active =>
+    `cursor:pointer;padding:5px 12px;border-radius:14px;font-size:13px;font-weight:600;border:none;` +
+    (active ? 'background:#1a3a5c;color:#e8edf4;' : 'background:transparent;color:#9aa3b2;');
+
+  let filterHtml = `
+    <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;flex-wrap:wrap;margin:0 0 16px">
+      <button style="${btnStyle(_cmpSeason===null)}" onclick="filterComparePage(null,_cmpPhase)">Alla säsonger</button>
+      ${sharedYears.map(y => `<button style="${btnStyle(_cmpSeason===y)}" onclick="filterComparePage(${y},_cmpPhase)">${fmtSeason(y)}</button>`).join('')}
+    </div>`;
+
+  const hasPhase = allRows1.some(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.phase; }) ||
+                   allRows2.some(r => { const m = MATCHES_BY_ID[get(r,'match_id')]; return m && m.phase; });
+  if (hasPhase) {
+    filterHtml += `
+      <div style="display:flex;gap:4px;background:#161f2e;border-radius:20px;padding:4px;width:fit-content;flex-wrap:wrap;margin:0 0 16px">
+        <button style="${btnStyle(_cmpPhase===null)}" onclick="filterComparePage(_cmpSeason,null)">Alla</button>
+        <button style="${btnStyle(_cmpPhase==='regular')}" onclick="filterComparePage(_cmpSeason,'regular')">Grundserie</button>
+        <button style="${btnStyle(_cmpPhase==='playoff')}" onclick="filterComparePage(_cmpSeason,'playoff')">Slutspel</button>
+      </div>`;
+  }
 
   // Header: två spelarkort sida vid sida
   function playerCard(p, s, key, side) {
@@ -1300,12 +1359,18 @@ function renderComparePage(key1, key2) {
 
   let html = `
     <div style="margin-bottom:10px">${backLink()}</div>
-    <div class="cmp-player-grid" style="margin-bottom:20px">
+    <div class="cmp-player-grid" style="margin-bottom:12px">
       ${playerCard(p1, s1, key1, 'a')}
       ${playerCard(p2, s2, key2, 'b')}
-    </div>`;
+    </div>
+    ${filterHtml}`;
 
   // Karriärsnitt med staplar
+  const filterLabel = [
+    _cmpSeason ? `Säsong ${fmtSeason(_cmpSeason)}` : 'Alla säsonger',
+    _cmpPhase === 'regular' ? 'Grundserie' : _cmpPhase === 'playoff' ? 'Slutspel' : '',
+  ].filter(Boolean).join(' · ');
+
   const statDefs = [
     {label:'PTS/m', a:s1.pts,  b:s2.pts,  dec:1},
     {label:'REB/m', a:s1.reb,  b:s2.reb,  dec:1},
@@ -1323,7 +1388,6 @@ function renderComparePage(key1, key2) {
     const vb = d.b != null ? d.b.toFixed(d.dec) : '–';
     const winA = d.a != null && (d.b == null || d.a > d.b);
     const winB = d.b != null && (d.a == null || d.b > d.a);
-    // TOV är inverterat — lägre är bättre
     const invertedWinA = d.label==='TOV/m' && d.a != null && (d.b == null || d.a < d.b);
     const invertedWinB = d.label==='TOV/m' && d.b != null && (d.a == null || d.b < d.a);
     const boldA = (d.label!=='TOV/m' && winA) || invertedWinA;
@@ -1340,7 +1404,7 @@ function renderComparePage(key1, key2) {
 
   html += `
     <div class="section">
-      <h2>Karriärsnitt — alla säsonger</h2>
+      <h2>Snitt — ${escapeHtml(filterLabel)}</h2>
       <div class="card">
         <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:13px">
           <span style="color:#6cb6ff;font-weight:600">${escapeHtml(fullName(p1))}</span>
@@ -1354,51 +1418,53 @@ function renderComparePage(key1, key2) {
       </div>
     </div>`;
 
-  // Säsong för säsong
-  const seasons1 = {}, seasons2 = {};
-  for (const r of rows1) { const m = MATCHES_BY_ID[get(r,'match_id')]; if (m) { if (!seasons1[m.year]) seasons1[m.year]=[]; seasons1[m.year].push(r); } }
-  for (const r of rows2) { const m = MATCHES_BY_ID[get(r,'match_id')]; if (m) { if (!seasons2[m.year]) seasons2[m.year]=[]; seasons2[m.year].push(r); } }
-  const allYears = [...new Set([...Object.keys(seasons1),...Object.keys(seasons2)].map(Number))].sort((a,b)=>b-a);
+  // Säsong för säsong (bara om inget säsongsfilter valt)
+  if (!_cmpSeason) {
+    const seasons1 = {}, seasons2 = {};
+    for (const r of rows1) { const m = MATCHES_BY_ID[get(r,'match_id')]; if (m) { if (!seasons1[m.year]) seasons1[m.year]=[]; seasons1[m.year].push(r); } }
+    for (const r of rows2) { const m = MATCHES_BY_ID[get(r,'match_id')]; if (m) { if (!seasons2[m.year]) seasons2[m.year]=[]; seasons2[m.year].push(r); } }
+    const visibleYears = [...new Set([...Object.keys(seasons1),...Object.keys(seasons2)].map(Number))].sort((a,b)=>b-a);
 
-  if (allYears.length > 1) {
-    const seasonRows = allYears.map(y => {
-      const r1 = seasons1[y], r2 = seasons2[y];
-      const pts1 = r1 ? avg(r1,'points') : null, pts2 = r2 ? avg(r2,'points') : null;
-      const reb1 = r1 ? r1.map(r=>(get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0)).reduce((a,b)=>a+b,0)/r1.length : null;
-      const reb2 = r2 ? r2.map(r=>(get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0)).reduce((a,b)=>a+b,0)/r2.length : null;
-      const ast1 = r1 ? avg(r1,'assists') : null, ast2 = r2 ? avg(r2,'assists') : null;
-      const g1 = r1 ? r1.length : 0, g2 = r2 ? r2.length : 0;
-      return `<tr class="match">
-        <td>${fmtSeason(y)}</td>
-        <td style="color:#6cb6ff">${fmt(pts1)}</td><td style="color:#6cb6ff">${fmt(reb1)}</td><td style="color:#6cb6ff">${fmt(ast1)}</td>
-        <td class="muted" style="font-size:12px">${g1 || '–'}</td>
-        <td class="muted" style="border-left:1px solid #2a2f3a"></td>
-        <td class="muted" style="font-size:12px">${g2 || '–'}</td>
-        <td style="color:#ff9966">${fmt(pts2)}</td><td style="color:#ff9966">${fmt(reb2)}</td><td style="color:#ff9966">${fmt(ast2)}</td>
-      </tr>`;
-    }).join('');
-    html += `
-      <div class="section">
-        <h2>Säsong för säsong</h2>
-        <div class="card scroll-x">
-          <table>
-            <thead><tr>
-              <th>Säsong</th>
-              <th colspan="3" style="color:#6cb6ff;text-align:center">${escapeHtml(p1.first)}</th>
-              <th style="font-size:11px">M</th>
-              <th></th>
-              <th style="font-size:11px">M</th>
-              <th colspan="3" style="color:#ff9966;text-align:center">${escapeHtml(p2.first)}</th>
-            </tr>
-            <tr>
-              <th></th>
-              <th>PTS</th><th>REB</th><th>AST</th><th></th><th></th><th></th>
-              <th>PTS</th><th>REB</th><th>AST</th>
-            </tr></thead>
-            <tbody>${seasonRows}</tbody>
-          </table>
-        </div>
-      </div>`;
+    if (visibleYears.length > 1) {
+      const seasonRows = visibleYears.map(y => {
+        const r1 = seasons1[y], r2 = seasons2[y];
+        const pts1 = r1 ? avg(r1,'points') : null, pts2 = r2 ? avg(r2,'points') : null;
+        const reb1 = r1 ? r1.map(r=>(get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0)).reduce((a,b)=>a+b,0)/r1.length : null;
+        const reb2 = r2 ? r2.map(r=>(get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0)).reduce((a,b)=>a+b,0)/r2.length : null;
+        const ast1 = r1 ? avg(r1,'assists') : null, ast2 = r2 ? avg(r2,'assists') : null;
+        const g1 = r1 ? r1.length : 0, g2 = r2 ? r2.length : 0;
+        return `<tr class="match">
+          <td>${fmtSeason(y)}</td>
+          <td style="color:#6cb6ff">${fmt(pts1)}</td><td style="color:#6cb6ff">${fmt(reb1)}</td><td style="color:#6cb6ff">${fmt(ast1)}</td>
+          <td class="muted" style="font-size:12px">${g1 || '–'}</td>
+          <td class="muted" style="border-left:1px solid #2a2f3a"></td>
+          <td class="muted" style="font-size:12px">${g2 || '–'}</td>
+          <td style="color:#ff9966">${fmt(pts2)}</td><td style="color:#ff9966">${fmt(reb2)}</td><td style="color:#ff9966">${fmt(ast2)}</td>
+        </tr>`;
+      }).join('');
+      html += `
+        <div class="section">
+          <h2>Säsong för säsong${_cmpPhase ? ` — ${_cmpPhase === 'regular' ? 'Grundserie' : 'Slutspel'}` : ''}</h2>
+          <div class="card scroll-x">
+            <table>
+              <thead><tr>
+                <th>Säsong</th>
+                <th colspan="3" style="color:#6cb6ff;text-align:center">${escapeHtml(p1.first)}</th>
+                <th style="font-size:11px">M</th>
+                <th></th>
+                <th style="font-size:11px">M</th>
+                <th colspan="3" style="color:#ff9966;text-align:center">${escapeHtml(p2.first)}</th>
+              </tr>
+              <tr>
+                <th></th>
+                <th>PTS</th><th>REB</th><th>AST</th><th></th><th></th><th></th>
+                <th>PTS</th><th>REB</th><th>AST</th>
+              </tr></thead>
+              <tbody>${seasonRows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }
   }
 
   $main.innerHTML = html;
@@ -1528,6 +1594,23 @@ function renderMatchPage(matchId) {
 
 // =============================================================================
 // Render: rekordbok
+// =============================================================================
+
+function renderAboutPage() {
+  $main.innerHTML = `
+    <div style="max-width:680px;margin:0 auto">
+      <div style="margin-bottom:16px">${backLink()}</div>
+      <div class="card" style="line-height:1.75;font-size:15px">
+        <h2 style="margin-top:0">Om groovestats</h2>
+        <p>Välkommen till groovestats. Detta är ett verktyg för att snabbt hitta relevant statistik inom Svensk Basket. Jag byggde den för att jag såg ett behov för mig själv, men du får hemskt gärna nyttja det om du tror att det finns något intressant att hitta. Det kan vara för dig som är journalist, coach, spelare eller helt enkelt en basketentusiast.</p>
+        <p>Om du hämtar statistik härifrån får du hemskt gärna länka till <strong>groovestats.se</strong>, så kanske fler hittar hit framöver.</p>
+        <p>Har du tankar, förslag eller önskemål kring vad som skulle kunna göra verktyget ännu bättre? Skriv ett mail till <a href="mailto:johannes@grufstedt.com">johannes@grufstedt.com</a> så lyssnar jag.</p>
+        <p style="margin-bottom:0">// Johannes Grufstedt</p>
+      </div>
+    </div>`;
+  window.scrollTo(0, 0);
+}
+
 // =============================================================================
 
 function renderRecordsPage() {
