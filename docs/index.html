@@ -1696,6 +1696,10 @@ function renderRecordsPage() {
   function extractVal(r, cat) {
     if (cat === 'reb') return (get(r,'rebounds_def')||0)+(get(r,'rebounds_off')||0);
     if (cat === 'fg3') return get(r,'three_made') || 0;
+    if (cat === 'pts') return get(r,'points')  || 0;
+    if (cat === 'ast') return get(r,'assists')  || 0;
+    if (cat === 'stl') return get(r,'steals')   || 0;
+    if (cat === 'blk') return get(r,'blocks')   || 0;
     return get(r, cat) || 0;
   }
 
