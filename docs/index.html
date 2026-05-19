@@ -173,6 +173,7 @@ tr.match:hover td:first-child { background: #1a1f2a; }
   <div class="row">
     <h1 style="margin:0;line-height:1"><a id="home-link"><img src="./assets/logo.svg" alt="groovestats" height="40" style="display:block"></a></h1>
     <a href="#/records" style="font-size:14px;white-space:nowrap;color:#9aa3b2" id="records-link">Rekord</a>
+    <a href="#/om" style="font-size:14px;white-space:nowrap;color:#9aa3b2" id="om-link">Om</a>
     <div class="search">
       <input type="text" id="search" placeholder="Sök spelare eller lag…" autocomplete="off" aria-label="Sök spelare eller lag">
     </div>
@@ -480,6 +481,8 @@ function route() {
     renderTeamPage(name);
   } else if (hash === '#/records') {
     renderRecordsPage();
+  } else if (hash === '#/om') {
+    renderAboutPage();
   } else if (hash.startsWith('#/match/')) {
     const mid = parseInt(hash.substring('#/match/'.length), 10);
     if (mid) renderMatchPage(mid);
@@ -1591,6 +1594,23 @@ function renderMatchPage(matchId) {
 
 // =============================================================================
 // Render: rekordbok
+// =============================================================================
+
+function renderAboutPage() {
+  $main.innerHTML = `
+    <div style="max-width:680px;margin:0 auto">
+      <div style="margin-bottom:16px">${backLink()}</div>
+      <div class="card" style="line-height:1.75;font-size:15px">
+        <h2 style="margin-top:0">Om groovestats</h2>
+        <p>Välkommen till groovestats. Detta är ett verktyg för att snabbt hitta relevant statistik inom Svensk Basket. Jag byggde den för att jag såg ett behov för mig själv, men du får hemskt gärna nyttja det om du tror att det finns något intressant att hitta. Det kan vara för dig som är journalist, coach, spelare eller helt enkelt en basketentusiast.</p>
+        <p>Om du hämtar statistik härifrån får du hemskt gärna länka till <strong>groovestats.se</strong>, så kanske fler hittar hit framöver.</p>
+        <p>Har du tankar, förslag eller önskemål kring vad som skulle kunna göra verktyget ännu bättre? Skriv ett mail till <a href="mailto:johannes@grufstedt.com">johannes@grufstedt.com</a> så lyssnar jag.</p>
+        <p style="margin-bottom:0">// Johannes Grufstedt</p>
+      </div>
+    </div>`;
+  window.scrollTo(0, 0);
+}
+
 // =============================================================================
 
 function renderRecordsPage() {
