@@ -604,6 +604,33 @@ function handleCompareClick(key) {
   }
 }
 
+function updatePCmpSearch(q) {
+  const drop = document.getElementById('p-cmp-drop');
+  if (!drop) return;
+  q = q.trim().toLowerCase();
+  if (!q) { drop.innerHTML = ''; return; }
+  const matches = Object.values(PLAYERS_BY_KEY)
+    .filter(p => p.key !== _pKey && fullName(p).toLowerCase().includes(q))
+    .sort((a, b) => fullName(a).localeCompare(fullName(b), 'sv'))
+    .slice(0, 10);
+  if (!matches.length) {
+    drop.innerHTML = '<div style="padding:8px 12px;color:#9aa3b2;font-size:13px">Inga spelare hittades</div>';
+    return;
+  }
+  drop.innerHTML = matches.map(p =>
+    `<div class="pcmp-row" data-key="${escapeHtml(p.key)}" onmousedown="pCmpPick(this)"
+          style="padding:8px 12px;font-size:13px;cursor:pointer"
+          onmouseover="this.style.background='#1e3a5c'" onmouseout="this.style.background=''">
+       ${escapeHtml(fullName(p))}
+     </div>`
+  ).join('');
+}
+
+function pCmpPick(el) {
+  const k2 = el.dataset.key;
+  if (k2 && _pKey) navigateToCompare(_pKey, k2);
+}
+
 function navigateHome(restoreSearch = false) {
   location.hash = '';
   $search.value = restoreSearch ? lastSearch : '';
@@ -1086,36 +1113,32 @@ function renderPlayerPage(key) {
     ? `<img class="photo" src="${escapeHtml(player.photo)}" alt="${escapeHtml(fullName(player))}">`
     : `<div class="photo"></div>`;
 
-  // Jämförelseknapp och eventuell banner
-  let compareBanner = '';
-  let cmpBtnLabel = 'Jämför';
-  let cmpBtnClass = 'btn-cmp';
-  if (COMPARE_KEY === key) {
-    cmpBtnLabel = '✕ Avmarkera';
-    cmpBtnClass = 'btn-cmp active';
-  } else if (COMPARE_KEY !== null) {
-    const cmpP = PLAYERS_BY_KEY[COMPARE_KEY];
-    const cmpName = cmpP ? fullName(cmpP) : COMPARE_KEY;
-    cmpBtnLabel = `Jämför med ${escapeHtml(cmpName)} →`;
-    cmpBtnClass = 'btn-cmp active';
-    compareBanner = `
-      <div class="cmp-banner">
-        <span style="color:#6cb6ff">⇄</span>
-        <span>Jämförelse pågår: <strong>${escapeHtml(cmpName)}</strong></span>
-        <button onclick="cancelCompare()" style="margin-left:auto;background:none;border:none;color:#9aa3b2;cursor:pointer;font-size:13px;padding:0">✕ Avbryt</button>
-      </div>`;
+  // Jämför: om COMPARE_KEY redan är satt (via sökresultat), gå direkt till jämförelse
+  if (COMPARE_KEY !== null && COMPARE_KEY !== key) {
+    navigateToCompare(COMPARE_KEY, key);
+    COMPARE_KEY = null;
+    return;
   }
+  COMPARE_KEY = null;
 
   let html = `
     <div style="margin-bottom:10px">${backLink()}</div>
-    ${compareBanner}
     <div class="card">
       <div class="player-grid">
         ${photo}
         <div>
           <div class="player-name">${escapeHtml(fullName(player))}</div>
           <div class="player-meta">${metaParts.join(' · ')}</div>
-          <button class="${cmpBtnClass}" onclick="handleCompareClick('${escapeHtml(key)}')">${cmpBtnLabel}</button>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;color:#9aa3b2">Jämför med:</span>
+            <div style="position:relative">
+              <input id="p-cmp-input" type="text" placeholder="Sök spelare…" autocomplete="off"
+                     oninput="updatePCmpSearch(this.value)"
+                     onblur="setTimeout(()=>{const d=document.getElementById('p-cmp-drop');if(d)d.innerHTML=''},200)"
+                     style="background:#1a2235;color:#e8edf4;border:1px solid #2a2f3a;border-radius:8px;padding:5px 10px;font-size:13px;width:180px;outline:none">
+              <div id="p-cmp-drop" style="position:absolute;top:calc(100% + 4px);left:0;min-width:200px;background:#1a2235;border:1px solid #2a2f3a;border-radius:8px;z-index:20;overflow:hidden"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>`;
@@ -2559,7 +2582,7 @@ function renderTeamComparePage(team1, team2) {
 
   html += `
     <div class="section">
-      <h2>Jämförelse — ${fmtSeason(_tcmpSeason)}</h2>
+      <h2>Snitt — ${fmtSeason(_tcmpSeason)}</h2>
       <div class="card">
         <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:13px">
           <span style="color:#6cb6ff;font-weight:600">${escapeHtml(team1)}</span>
