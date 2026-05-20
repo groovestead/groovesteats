@@ -224,6 +224,7 @@ let _pFilteredRows = [];      // current filtered rows (season + phase)
 let _tName = null;            // current team page name
 let _tSeason = null;          // selected season year on team page (null = all)
 let _tLineups = {};           // cache: {teamName: {year: [...]}} loaded from lineups JSON
+let _tSectionOpen = {};       // {bodyId: bool} — false = collapsed, default open
 let _tcmpTeam1 = null;        // team A on compare-team page
 let _tcmpTeam2 = null;        // team B on compare-team page
 let _tcmpSeason = null;       // selected season on compare-team page
@@ -398,6 +399,17 @@ function computeTeamRankings(year) {
 function navigateToTeamCompare(t1, t2) {
   location.hash = '#/compare-team/' + encodeURIComponent(t1) + '/' + encodeURIComponent(t2);
 }
+
+// Returns a collapsible <h2> + wrapper div opener for a team-page section.
+// Usage: wrap content between tSecOpen(key, title) and tSecClose().
+function tSecOpen(key, title) {
+  const bodyId = 'tsec-' + key + '-body';
+  const chevId = 'tsec-' + key + '-chevron';
+  const isOpen = _tSectionOpen[bodyId] !== false;
+  return `<h2 class="collapsible-heading" onclick="toggleSection('${bodyId}')">${title}<span class="collapsible-chevron${isOpen ? ' open' : ''}" id="${chevId}">▶</span></h2>` +
+         `<div id="${bodyId}" style="display:${isOpen ? '' : 'none'}">`;
+}
+function tSecClose() { return '</div>'; }
 
 // Avancerade effektivitetsmått (per match)
 function efg(r) {
@@ -934,6 +946,7 @@ function toggleSection(bodyId) {
   body.style.display = open ? '' : 'none';
   if (chevron) chevron.classList.toggle('open', open);
   if (bodyId === 'game-log-body') _glOpen = open;
+  if (bodyId.startsWith('tsec-')) _tSectionOpen[bodyId] = open;
 }
 
 function backLink() {
@@ -2024,7 +2037,7 @@ function renderLineupsSection(teamName, allData) {
 
   return `
     <div class="section">
-      <h2>Vanligaste femmor — ${seasonLabel}</h2>
+      ${tSecOpen('lineups', `Vanligaste femmor — ${seasonLabel}`)}
       <div class="card scroll-x">
         <table>
           <thead><tr>
@@ -2037,6 +2050,7 @@ function renderLineupsSection(teamName, allData) {
           <tbody>${tableRows}</tbody>
         </table>
       </div>
+      ${tSecClose()}
     </div>`;
 }
 
@@ -2115,18 +2129,19 @@ function renderTeamRankings(teamName, year) {
   if (!rows) return '';
   return `
     <div class="section">
-      <h2>Ligaranking — ${fmtSeason(year)}</h2>
+      ${tSecOpen('rankings', `Ligaranking — ${fmtSeason(year)}`)}
       <div class="card scroll-x">
         <table>
           <thead><tr><th>Kategori</th><th>Värde</th><th>Placering</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
+      ${tSecClose()}
     </div>`;
 }
 
 function renderTeamPage(teamName) {
-  if (teamName !== _tName) _tSeason = null;
+  if (teamName !== _tName) { _tSeason = null; _tSectionOpen = {}; }
   _tName = teamName;
   const td = TEAMS_DATA[teamName];
   if (!td) {
@@ -2169,13 +2184,14 @@ function renderTeamPage(teamName) {
     }).join('');
     html += `
       <div class="section">
-        <h2>SM-historia</h2>
+        ${tSecOpen('smhistoria', 'SM-historia')}
         <div class="card scroll-x">
           <table>
             <thead><tr><th>Säsong</th><th>Roll</th><th>Mot</th></tr></thead>
             <tbody>${finRows}</tbody>
           </table>
         </div>
+        ${tSecClose()}
       </div>`;
   }
 
@@ -2195,13 +2211,14 @@ function renderTeamPage(teamName) {
   }).join('');
   html += `
     <div class="section">
-      <h2>Säsongsrekord</h2>
+      ${tSecOpen('sasong', 'Säsongshistorik')}
       <div class="card scroll-x">
         <table>
           <thead><tr><th>Säsong</th><th>V–F</th><th>Pts/m (för)</th><th>Pts/m (mot)</th><th>Matcher</th></tr></thead>
           <tbody id="season-record-body">${seasonRows}</tbody>
         </table>
       </div>
+      ${tSecClose()}
     </div>`;
 
   // Säsongsfilter-knappar + ligaledare
@@ -2219,7 +2236,7 @@ function renderTeamPage(teamName) {
   const compareTeamHtml = otherTeams.length ? `
     <div style="margin:20px 0 0">
       <label style="font-size:13px;color:#9aa3b2;margin-right:8px">Jämför med:</label>
-      <select onchange="if(this.value)navigateToTeamCompare(${JSON.stringify(teamName)},this.value)" style="background:#1a2235;color:#e8edf4;border:1px solid #2a2f3a;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
+      <select data-team="${escapeHtml(teamName)}" onchange="if(this.value)navigateToTeamCompare(this.dataset.team,this.value)" style="background:#1a2235;color:#e8edf4;border:1px solid #2a2f3a;border-radius:8px;padding:5px 10px;font-size:13px;cursor:pointer">
         <option value="">Välj lag…</option>
         ${otherTeams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
       </select>
@@ -2274,7 +2291,7 @@ function renderTeamSeasonLeaders(teamName, year) {
       return {key, name, val, games: rows.length};
     }).filter(x => x.val != null && x.val > 0)
       .sort((a, b) => b.val - a.val)
-      .slice(0, 5);
+      .slice(0, year === null ? 10 : Infinity);
 
     if (!playerStats.length) return '';
     const rows = playerStats.map((x, i) => {
@@ -2300,15 +2317,16 @@ function renderTeamSeasonLeaders(teamName, year) {
   }).filter(Boolean).join('');
 
   if (!sections) return '';
-  const heading = year === null ? 'Alla säsonger — snitt med laget' : `Säsong ${fmtSeason(year)} — ligaledare`;
+  const heading = year === null ? 'Alla säsonger — snitt med laget' : `Säsong ${fmtSeason(year)} — spelare`;
   return `
     <div class="section">
-      <h2>${heading}</h2>
+      ${tSecOpen('leaders', heading)}
       <div class="card">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:20px;overflow:hidden">
           ${sections}
         </div>
       </div>
+      ${tSecClose()}
     </div>`;
 }
 
